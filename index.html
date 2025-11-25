@@ -1,108 +1,143 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>ArtFlow | Artist Portfolio</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@300;400;500;700&display=swap" rel="stylesheet">
-    <script>
-      tailwind.config = {
-        theme: {
-          extend: {
-            fontFamily: {
-              sans: ['"Noto Sans SC"', 'sans-serif'],
-            },
-            colors: {
-              primary: {
-                50: '#fff1f2',
-                100: '#ffe4e6',
-                200: '#fecdd3',
-                300: '#fda4af',
-                400: '#fb7185',
-                500: '#f43f5e',
-                600: '#e11d48',
-                700: '#be123c',
-              }
-            },
-            animation: {
-              'blob': 'blob 7s infinite',
-            },
-            keyframes: {
-              blob: {
-                '0%': { transform: 'translate(0px, 0px) scale(1)' },
-                '33%': { transform: 'translate(30px, -50px) scale(1.1)' },
-                '66%': { transform: 'translate(-20px, 20px) scale(0.9)' },
-                '100%': { transform: 'translate(0px, 0px) scale(1)' },
-              }
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ArtFlow | Artist Portfolio</title>
+
+  <!-- Tailwind CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+
+  <!-- Google Fonts -->
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@300;400;500;700&display=swap" rel="stylesheet">
+
+  <!-- Tailwind 配置 -->
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['"Noto Sans SC"', 'sans-serif'],
+          },
+          colors: {
+            primary: {
+              50: '#fff1f2',
+              100: '#ffe4e6',
+              200: '#fecdd3',
+              300: '#fda4af',
+              400: '#fb7185',
+              500: '#f43f5e',
+              600: '#e11d48',
+              700: '#be123c',
             }
           },
+          animation: {
+            'blob': 'blob 7s infinite',
+          },
+          keyframes: {
+            blob: {
+              '0%': { transform: 'translate(0px, 0px) scale(1)' },
+              '33%': { transform: 'translate(30px, -50px) scale(1.1)' },
+              '66%': { transform: 'translate(-20px, 20px) scale(0.9)' },
+              '100%': { transform: 'translate(0px, 0px) scale(1)' },
+            }
+          }
         },
-      }
-    </script>
-    <style>
-      body {
-        /* Soft pastel gradient background */
-        background: radial-gradient(at 0% 0%, hsla(253,16%,7%,1) 0, transparent 50%), 
-                    radial-gradient(at 50% 0%, hsla(225,39%,30%,1) 0, transparent 50%), 
-                    radial-gradient(at 100% 0%, hsla(339,49%,30%,1) 0, transparent 50%);
-        background-color: #f0f2f5;
-        background-image: 
-          radial-gradient(at 40% 20%, hsla(28,100%,74%,1) 0px, transparent 50%),
-          radial-gradient(at 80% 0%, hsla(189,100%,56%,1) 0px, transparent 50%),
-          radial-gradient(at 0% 50%, hsla(340,100%,76%,1) 0px, transparent 50%),
-          radial-gradient(at 80% 50%, hsla(240,100%,70%,1) 0px, transparent 50%),
-          radial-gradient(at 0% 100%, hsla(22,100%,77%,1) 0px, transparent 50%),
-          radial-gradient(at 80% 100%, hsla(242,100%,70%,1) 0px, transparent 50%),
-          radial-gradient(at 0% 0%, hsla(343,100%,76%,1) 0px, transparent 50%);
-        background-attachment: fixed;
-        background-size: cover;
-        color: #334155;
-      }
-      
-      /* Glassmorphism Utilities */
-      .glass-panel {
-        background: rgba(255, 255, 255, 0.65);
-        backdrop-filter: blur(16px);
-        -webkit-backdrop-filter: blur(16px);
-        border: 1px solid rgba(255, 255, 255, 0.5);
-      }
+      },
+    }
+  </script>
 
-      .glass-card {
-        background: rgba(255, 255, 255, 0.45);
-        backdrop-filter: blur(12px);
-        -webkit-backdrop-filter: blur(12px);
-        border: 1px solid rgba(255, 255, 255, 0.6);
-        box-shadow: 0 4px 30px rgba(0, 0, 0, 0.05);
-      }
+  <!-- 自定义 CSS -->
+  <style>
+    body {
+      background: radial-gradient(at 0% 0%, hsla(253,16%,7%,1) 0, transparent 50%), 
+                  radial-gradient(at 50% 0%, hsla(225,39%,30%,1) 0, transparent 50%), 
+                  radial-gradient(at 100% 0%, hsla(339,49%,30%,1) 0, transparent 50%);
+      background-color: #f0f2f5;
+      background-image: 
+        radial-gradient(at 40% 20%, hsla(28,100%,74%,1) 0px, transparent 50%),
+        radial-gradient(at 80% 0%, hsla(189,100%,56%,1) 0px, transparent 50%),
+        radial-gradient(at 0% 50%, hsla(340,100%,76%,1) 0px, transparent 50%),
+        radial-gradient(at 80% 50%, hsla(240,100%,70%,1) 0px, transparent 50%),
+        radial-gradient(at 0% 100%, hsla(22,100%,77%,1) 0px, transparent 50%),
+        radial-gradient(at 80% 100%, hsla(242,100%,70%,1) 0px, transparent 50%),
+        radial-gradient(at 0% 0%, hsla(343,100%,76%,1) 0px, transparent 50%);
+      background-attachment: fixed;
+      background-size: cover;
+      color: #334155;
+      font-family: "Noto Sans SC", sans-serif;
+    }
 
-      .glass-card:hover {
-        background: rgba(255, 255, 255, 0.6);
-        border: 1px solid rgba(255, 255, 255, 0.8);
-        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
-      }
+    .glass-panel {
+      background: rgba(255, 255, 255, 0.65);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      border: 1px solid rgba(255, 255, 255, 0.5);
+      padding: 2rem;
+      border-radius: 1rem;
+    }
 
-      /* Hide scrollbar for clean look */
-      .no-scrollbar::-webkit-scrollbar {
-        display: none;
-      }
-      .no-scrollbar {
-        -ms-overflow-style: none;
-        scrollbar-width: none;
-      }
-    </style>
+    .glass-card {
+      background: rgba(255, 255, 255, 0.45);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border: 1px solid rgba(255, 255, 255, 0.6);
+      box-shadow: 0 4px 30px rgba(0, 0, 0, 0.05);
+      padding: 1.5rem;
+      border-radius: 1rem;
+      transition: all 0.3s ease;
+    }
+
+    .glass-card:hover {
+      background: rgba(255, 255, 255, 0.6);
+      border: 1px solid rgba(255, 255, 255, 0.8);
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+    }
+
+    .no-scrollbar::-webkit-scrollbar {
+      display: none;
+    }
+    .no-scrollbar {
+      -ms-overflow-style: none;
+      scrollbar-width: none;
+    }
+  </style>
+
+  <!-- Importmap 引入 React -->
   <script type="importmap">
-{
-  "imports": {
-    "react/": "https://aistudiocdn.com/react@^19.2.0/",
-    "react": "https://aistudiocdn.com/react@^19.2.0",
-    "react-dom/": "https://aistudiocdn.com/react-dom@^19.2.0/",
-    "lucide-react": "https://aistudiocdn.com/lucide-react@^0.554.0"
+  {
+    "imports": {
+      "react": "https://cdn.jsdelivr.net/npm/react@18/umd/react.production.min.js",
+      "react-dom": "https://cdn.jsdelivr.net/npm/react-dom@18/umd/react-dom.production.min.js"
+    }
   }
-}
-</script>
+  </script>
 </head>
-  <body>
-    <div id="root"></div>
-  </body>
+
+<body>
+  <div id="root"></div>
+
+  <!-- React 渲染脚本 -->
+  <script type="module">
+    import React from "react";
+    import ReactDOM from "react-dom";
+
+    function App() {
+      return (
+        <div className="flex flex-col justify-center items-center h-screen gap-6">
+          <h1 className="text-5xl font-bold text-primary-500 text-center">ArtFlow</h1>
+          <p className="text-lg text-gray-700 text-center max-w-xl">
+            欢迎来到我的艺术作品集。这里展示了我最喜欢的创作与设计。
+          </p>
+          <div className="glass-card">
+            <p className="text-gray-800">✨ 作品预览区域 ✨</p>
+          </div>
+        </div>
+      );
+    }
+
+    const root = document.getElementById("root");
+    ReactDOM.render(<App />, root);
+  </script>
+</body>
 </html>
