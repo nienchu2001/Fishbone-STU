@@ -6,6 +6,7 @@ import { ScheduleBoard } from './components/ScheduleBoard';
 import { SettingsPanel } from './components/SettingsPanel';
 import { ServicesList } from './components/ServicesList';
 import { ViewState, UserProfile, BusinessCategory, PortfolioItem, CommissionSlot, CommissionStatus, AppData, ImportTemplate, ThemeSettings, PortfolioLayoutMode } from './types';
+import { X, Copy, Check, FileCode, Zap, Info } from 'lucide-react';
 
 const STORAGE_KEY = 'artflow_data_v1';
 
@@ -118,6 +119,11 @@ const App: React.FC = () => {
   const [saveStatus, setSaveStatus] = useState<'saved' | 'saving'>('saved');
   const [data, setData] = useState<AppData>(loadInitialState);
 
+  // Share Modal State
+  const [showShareModal, setShowShareModal] = useState(false);
+  const [shareUrl, setShareUrl] = useState('');
+  const [linkCopied, setLinkCopied] = useState(false);
+
   // Destructure
   const { user, categories, portfolio, scheduleSlots, importTemplates, theme, portfolioLayout } = data;
 
@@ -194,7 +200,7 @@ const App: React.FC = () => {
     }
   }, [theme.customFontUrl]);
 
-  // --- 4. Share Logic ---
+  // --- 4. Share Logic (Pruning & Compression) ---
   const handleShare = useCallback(() => {
       const isBase64 = (str: string) => str && str.startsWith('data:');
 
@@ -213,19 +219,34 @@ const App: React.FC = () => {
           backgroundImage: isBase64(theme.backgroundImage) ? '' : theme.backgroundImage
       };
 
-      const payload: Partial<AppData> = {
+      // DATA PRUNING: Remove heavy/private fields for shorter URL
+      // Remove 'requirements' from schedule to save space and protect details
+      const prunedSlots = scheduleSlots.map(slot => ({
+        id: slot.id,
+        clientName: slot.clientName,
+        type: slot.type,
+        status: slot.status,
+        deadline: slot.deadline,
+        progress: slot.progress
+        // requirements: REMOVED
+      }));
+
+      // Remove 'details' from categories if it's too long, or keep it if essential. 
+      // For maximum shrinking, we remove templates.
+      const prunedPayload: Partial<AppData> = {
           user: safeUser,
           categories,
           portfolio: safePortfolio,
-          scheduleSlots,
+          scheduleSlots: prunedSlots, // Use pruned slots
           theme: safeTheme,
           portfolioLayout,
           lastUpdated: new Date().toISOString()
+          // importTemplates: REMOVED
       };
 
       if (window.LZString) {
           try {
-              const json = JSON.stringify(payload);
+              const json = JSON.stringify(prunedPayload);
               const compressed = window.LZString.compressToEncodedURIComponent(json);
               
               const url = new URL(window.location.href);
@@ -233,14 +254,13 @@ const App: React.FC = () => {
               if (user.name) url.searchParams.set('artist', user.name);
               url.searchParams.set('data', compressed);
               
-              const shareLink = url.toString();
-              
-              navigator.clipboard.writeText(shareLink).then(() => {
-                  const hasStrippedImages = portfolio.some(p => isBase64(p.imageUrl)) || isBase64(user.avatar) || isBase64(theme.backgroundImage);
-                  if (hasStrippedImages) {
-                      alert("专属快照链接已生成！\n\n注意：您使用了本地上传的图片(Base64)，由于链接长度限制，这些图片在分享链接中无法显示。\n建议使用「图片URL」来获得最佳的分享体验。");
-                  } 
-              });
+              setShareUrl(url.toString());
+              setShowShareModal(true);
+
+              const hasStrippedImages = portfolio.some(p => isBase64(p.imageUrl)) || isBase64(user.avatar) || isBase64(theme.backgroundImage);
+              if (hasStrippedImages) {
+                  // Optional: You could show a warning in the modal instead of alert
+              } 
 
           } catch (e) {
               console.error("Compression failed", e);
@@ -260,7 +280,7 @@ const App: React.FC = () => {
   const handleUpdateCategories = useCallback((c: BusinessCategory[]) => updateData({ categories: c }), [updateData]);
   const handleUpdateTheme = useCallback((t: ThemeSettings) => updateData({ theme: t }), [updateData]);
   const handleUpdateLayout = useCallback((l: PortfolioLayoutMode) => updateData({ portfolioLayout: l }), [updateData]);
-  const handleAddPortfolioItem = useCallback((i: PortfolioItem) => updateData({ portfolio: [i, ...portfolio] }), [updateData, portfolio]); // Note: portfolio dependency needed here unless we use functional update inside specific handler
+  const handleAddPortfolioItem = useCallback((i: PortfolioItem) => updateData({ portfolio: [i, ...portfolio] }), [updateData, portfolio]); 
   const handleDeletePortfolioItem = useCallback((id: string) => updateData({ portfolio: portfolio.filter(i => i.id !== id) }), [updateData, portfolio]);
   const handleImportSchedule = useCallback((s: CommissionSlot[]) => updateData({ scheduleSlots: [...scheduleSlots, ...s] }), [updateData, scheduleSlots]);
   const handleUpdateSlot = useCallback((id: string, u: Partial<CommissionSlot>) => updateData({ scheduleSlots: scheduleSlots.map(s => s.id === id ? { ...s, ...u } : s) }), [updateData, scheduleSlots]);
@@ -413,6 +433,68 @@ const App: React.FC = () => {
           </div>
         </main>
       </div>
+
+      {showShareModal && (
+        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-[100] flex items-center justify-center p-4 animate-in fade-in duration-200">
+           <div className="bg-white rounded-2xl w-full max-w-2xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
+               <div className="p-4 border-b border-slate-100 flex justify-between items-center bg-white/50 backdrop-blur">
+                   <h3 className="font-bold text-slate-800 flex items-center gap-2"><Zap size={20} className="text-amber-500"/> 分享主页 Share Profile</h3>
+                   <button onClick={() => setShowShareModal(false)}><X size={20} className="text-slate-400 hover:text-slate-600"/></button>
+               </div>
+               
+               <div className="p-6 space-y-6 overflow-y-auto">
+                   <div className="bg-blue-50 border border-blue-100 rounded-xl p-4 flex gap-3">
+                       <Info className="text-blue-500 shrink-0 mt-0.5" size={18}/>
+                       <div className="text-sm text-blue-800 space-y-1">
+                           <p className="font-bold">快照链接已生成 (Snapshot Generated)</p>
+                           <p>此链接已进行“瘦身”处理，移除了排单详情和隐私备注，方便顾客快速查看档期和作品。</p>
+                       </div>
+                   </div>
+
+                   <div className="space-y-2">
+                       <label className="text-xs font-bold text-slate-500 uppercase">Snapshot Link (Shortened)</label>
+                       <div className="flex gap-2">
+                           <input 
+                             readOnly 
+                             value={shareUrl} 
+                             className="flex-1 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs font-mono text-slate-600 outline-none focus:ring-2 focus:ring-primary-100"
+                           />
+                           <button 
+                             onClick={() => {
+                                 navigator.clipboard.writeText(shareUrl);
+                                 setLinkCopied(true);
+                                 setTimeout(() => setLinkCopied(false), 2000);
+                             }}
+                             className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-lg font-bold text-sm transition-colors flex items-center gap-2 shrink-0"
+                           >
+                               {linkCopied ? <Check size={16}/> : <Copy size={16}/>}
+                               {linkCopied ? 'Copied' : 'Copy'}
+                           </button>
+                       </div>
+                       <p className="text-[10px] text-slate-400">
+                           * 如果链接依然过长导致无法发送，请使用下方的“部署代码”方案。
+                       </p>
+                   </div>
+
+                   <div className="border-t border-slate-100 pt-6">
+                       <h4 className="font-bold text-slate-700 mb-3 flex items-center gap-2"><FileCode size={18}/> 终极短链方案 (Deployment)</h4>
+                       <p className="text-sm text-slate-500 mb-4">
+                           如果你希望获得最短、永久的链接 (如 <code>mysite.vercel.app</code>)，请将你的数据生成为代码，并更新到项目中进行部署。
+                       </p>
+                       <button 
+                         onClick={() => {
+                             setShowShareModal(false);
+                             setView('settings');
+                         }}
+                         className="w-full py-3 border border-slate-300 rounded-xl font-bold text-slate-600 hover:bg-slate-50 transition-colors"
+                       >
+                           前往控制台生成部署代码 (Go to Console)
+                       </button>
+                   </div>
+               </div>
+           </div>
+        </div>
+      )}
     </div>
   );
 };

@@ -1,5 +1,5 @@
 
-import React, { useState } from 'react';
+import React from 'react';
 import { Calendar, Settings, Image as ImageIcon, Briefcase, Share2, LogOut, Check, Cloud } from 'lucide-react';
 import { ViewState, UserProfile } from '../types';
 
@@ -24,21 +24,11 @@ export const Sidebar = React.memo<SidebarProps>(({
   onToggleReadOnly,
   onShare
 }) => {
-  const [showShareTooltip, setShowShareTooltip] = useState(false);
-
   const menuItems = [
     { id: 'portfolio', label: '作品集', icon: ImageIcon },
     { id: 'services', label: '业务类型', icon: Briefcase },
     { id: 'schedule', label: '排单档期', icon: Calendar },
   ] as const;
-
-  const handleShareClick = () => {
-    if (onShare) {
-      onShare();
-      setShowShareTooltip(true);
-      setTimeout(() => setShowShareTooltip(false), 3000);
-    }
-  };
 
   return (
     <aside className="fixed left-0 top-0 h-full w-20 lg:w-64 flex flex-col items-center lg:items-start z-50 transition-all duration-300 glass-panel border-r-0 shadow-[4px_0_24px_rgba(0,0,0,0.02)]">
@@ -106,20 +96,13 @@ export const Sidebar = React.memo<SidebarProps>(({
       <div className="p-4 w-full space-y-4">
         {!isVisitor && (
           !isReadOnly ? (
-            <div className="relative">
-              <button 
-                onClick={handleShareClick}
-                className="w-full flex items-center justify-center gap-2 py-3 bg-slate-800 text-white rounded-xl font-bold shadow-lg hover:bg-slate-700 transition-all hover:-translate-y-0.5"
-              >
-                {showShareTooltip ? <Check size={18} /> : <Share2 size={18} />}
-                <span className="hidden lg:inline">{showShareTooltip ? '链接已复制' : '分享主页'}</span>
-              </button>
-              {showShareTooltip && (
-                <div className="absolute -top-20 left-1/2 -translate-x-1/2 bg-slate-900 text-white text-xs py-2 px-3 rounded-lg whitespace-nowrap animate-fade-in shadow-xl z-[9999] pointer-events-none">
-                  专属链接已生成并复制！<br/>Snapshot Link Copied!
-                </div>
-              )}
-            </div>
+            <button 
+              onClick={onShare}
+              className="w-full flex items-center justify-center gap-2 py-3 bg-slate-800 text-white rounded-xl font-bold shadow-lg hover:bg-slate-700 transition-all hover:-translate-y-0.5"
+            >
+              <Share2 size={18} />
+              <span className="hidden lg:inline">分享主页</span>
+            </button>
           ) : (
             <button 
               onClick={onToggleReadOnly}
