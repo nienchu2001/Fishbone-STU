@@ -766,8 +766,9 @@ const INITIAL_TEMPLATES: ImportTemplate[] = ${JSON.stringify(templates || [], nu
                         <UploadCloud size={20} className="text-blue-500"/> 
                         推荐图床导航 (Free Image Hosting)
                     </h3>
-                    <p className="text-xs text-slate-500 mb-4">
-                        为了获得更短的分享链接，建议将图片上传到图床，获取 <code>https://...</code> 开头的短链接。
+                    <p className="text-xs text-slate-500 mb-4 bg-yellow-50 p-2 rounded border border-yellow-100">
+                        <Info size={12} className="inline mr-1 mb-0.5 text-yellow-600"/>
+                        <strong>重要提示 (Important):</strong> 为了获得最短的“快照分享”链接，强烈建议将您的背景图、作品集图片上传到图床，并使用 https:// 开头的链接，而不是使用本地上传功能。
                     </p>
                     
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-4">

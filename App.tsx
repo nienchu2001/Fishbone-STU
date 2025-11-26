@@ -6,7 +6,7 @@ import { ScheduleBoard } from './components/ScheduleBoard';
 import { SettingsPanel } from './components/SettingsPanel';
 import { ServicesList } from './components/ServicesList';
 import { ViewState, UserProfile, BusinessCategory, PortfolioItem, CommissionSlot, CommissionStatus, AppData, ImportTemplate, ThemeSettings, PortfolioLayoutMode } from './types';
-import { X, Copy, Check, FileCode, Zap, Info, Link as LinkIcon } from 'lucide-react';
+import { X, Copy, Check, FileCode, Zap, Info, Link as LinkIcon, Scissors } from 'lucide-react';
 
 const STORAGE_KEY = 'artflow_data_v1';
 
@@ -113,55 +113,82 @@ const loadInitialState = (): AppData => {
   return DEFAULT_STATE;
 };
 
-// --- ULTRA COMPRESSION HELPERS ---
+// --- ULTRA COMPRESSION HELPERS V2 ---
+
+// 1. URL Protocol Stripping (Saves 8 chars per URL)
+// Replaces 'https://' with '$'
+const compressUrl = (url: string) => {
+    if (!url) return '';
+    if (url.startsWith('https://')) return '$' + url.slice(8);
+    if (url.startsWith('http://')) return '~' + url.slice(7);
+    return url;
+};
+const decompressUrl = (url: string) => {
+    if (!url) return '';
+    if (url.startsWith('$')) return 'https://' + url.slice(1);
+    if (url.startsWith('~')) return 'http://' + url.slice(1);
+    return url;
+};
+
+// 2. Date Compression (Saves 2-4 chars)
+// 2024-12-25 -> 241225
+const compressDate = (date: string) => {
+    if (!date || date === 'TBD') return '';
+    return date.replace(/^20/, '').replace(/-/g, ''); // 2024-01-01 -> 240101
+};
+const decompressDate = (short: string) => {
+    if (!short) return 'TBD';
+    if (short.length !== 6) return short;
+    return `20${short.slice(0,2)}-${short.slice(2,4)}-${short.slice(4,6)}`;
+};
 
 // Map string status to integer 0-5
 const mapStatusToInt = (s: string) => Math.max(0, STATUS_ORDER.indexOf(s as CommissionStatus));
-// Map integer back to status string
 const mapIntToStatus = (i: number) => STATUS_ORDER[i] || 'waiting';
 
-// Pack Data into Array-of-Arrays (Minimizes JSON structure overhead)
+// Pack Data into Ultra-Lite Array
 // Structure: [ UserArr, ThemeArr, CatsArr, SlotsArr, PortfolioArr ]
 const packData = (data: AppData): any[] => {
-    const isBase64 = (str: string) => str && str.startsWith('data:');
-
-    // 1. User: [name, contact, avatar_url (if not base64)]
-    // Dropped Bio to save space
+    // 1. User: [name, contact, compressed_avatar]
     const u = [
         data.user.name, 
         data.user.contact, 
-        isBase64(data.user.avatar) ? '' : data.user.avatar
+        compressUrl(data.user.avatar)
     ];
 
-    // 2. Theme: [bg_url (if not base64), font_idx, opacity]
+    // 2. Theme: [compressed_bg, font_idx, opacity, compressed_custom_font]
     const fontIdx = Math.max(0, FONT_ORDER.indexOf(data.theme.font));
     const t = [
-        isBase64(data.theme.backgroundImage) ? '' : data.theme.backgroundImage,
+        compressUrl(data.theme.backgroundImage),
         fontIdx,
-        data.theme.overlayOpacity
+        Math.round(data.theme.overlayOpacity * 100), // Store as integer 0-100
+        compressUrl(data.theme.customFontUrl || '')
     ];
 
-    // 3. Categories: [[id, name, price]] 
-    // Dropped descriptions
-    const c = data.categories.map(cat => [cat.id, cat.name, cat.priceRange]);
+    // 3. Categories: [[name, price]] (Implicit Index ID)
+    const c = data.categories.map(cat => [cat.name, cat.priceRange]);
 
-    // 4. Slots: [[name, type, status_int, deadline]]
-    // Dropped requirements, progress (can be inferred), id
+    // 4. Slots: [[name, status_int, compressed_date]]
+    // Removed Type (Customer just needs to see if a slot is taken or progress)
     const s = data.scheduleSlots.map(slot => [
         slot.clientName,
-        slot.type,
         mapStatusToInt(slot.status),
-        slot.deadline
+        compressDate(slot.deadline)
     ]);
 
-    // 5. Portfolio: [[title, cat_id, url, is_video_int]]
-    // Dropped Date, ID
-    const p = data.portfolio.map(item => [
-        item.title,
-        item.category,
-        isBase64(item.imageUrl) ? '' : item.imageUrl, // Skip base64 images
-        item.mediaType === 'video' ? 1 : 0
-    ]).filter(item => item[2]); // Remove items with empty URLs (stripped base64)
+    // 5. Portfolio: [[title, cat_index, compressed_url, is_video_int]]
+    // Map category ID to Index to save space
+    const catIdToIndex = new Map(data.categories.map((c, i) => [c.id, i]));
+    
+    const p = data.portfolio.map(item => {
+        const catIdx = catIdToIndex.get(item.category) ?? 0;
+        return [
+            item.title,
+            catIdx,
+            compressUrl(item.imageUrl),
+            item.mediaType === 'video' ? 1 : 0
+        ];
+    }).filter(item => item[2] && (item[2] as string).length < 200); // Filter out massive base64s, keep only URLs or short strings
 
     return [u, t, c, s, p];
 };
@@ -175,52 +202,58 @@ const unpackData = (packed: any[]): Partial<AppData> => {
             ...INITIAL_USER,
             name: u[0] || INITIAL_USER.name,
             contact: u[1] || INITIAL_USER.contact,
-            avatar: u[2] || INITIAL_USER.avatar,
-            bio: "Welcome! (Bio hidden in snapshot view)" 
+            avatar: decompressUrl(u[2]),
+            bio: "" // Lite mode hides bio
         };
 
         // Unpack Theme
         const theme: ThemeSettings = {
             ...INITIAL_THEME,
-            backgroundImage: t[0] || '',
+            backgroundImage: decompressUrl(t[0]),
             font: FONT_ORDER[t[1]] as any || 'sans',
-            overlayOpacity: t[2] ?? 0.2
+            overlayOpacity: (t[2] || 20) / 100,
+            customFontUrl: decompressUrl(t[3])
         };
 
-        // Unpack Categories
-        const categories: BusinessCategory[] = c.map((cat: any[]) => ({
-            id: cat[0],
-            name: cat[1],
-            priceRange: cat[2],
-            description: "Details hidden in snapshot.",
+        // Unpack Categories (Reconstruct IDs from index)
+        const categories: BusinessCategory[] = c.map((cat: any[], i: number) => ({
+            id: `cat_${i}`, // Generated ID
+            name: cat[0],
+            priceRange: cat[1],
+            description: "",
             details: ""
         }));
 
         // Unpack Slots
         const scheduleSlots: CommissionSlot[] = s.map((slot: any[], idx: number) => {
-            const statusStr = mapIntToStatus(slot[2]);
-            // Estimate progress based on status
-            const progress = (slot[2] / 5) * 100;
+            const statusStr = mapIntToStatus(slot[1]);
+            const progress = (slot[1] / 5) * 100;
             return {
-                id: `snap_${idx}`,
+                id: `snap_s_${idx}`,
                 clientName: slot[0],
-                type: slot[1],
+                type: 'Commission', // Generic type
                 status: statusStr,
-                deadline: slot[3],
+                deadline: decompressDate(slot[2]),
                 progress: progress,
                 requirements: ""
             };
         });
 
         // Unpack Portfolio
-        const portfolio: PortfolioItem[] = p.map((item: any[], idx: number) => ({
-            id: `snap_p_${idx}`,
-            title: item[0],
-            category: item[1],
-            imageUrl: item[2],
-            mediaType: item[3] === 1 ? 'video' : 'image',
-            date: ''
-        }));
+        const portfolio: PortfolioItem[] = p.map((item: any[], idx: number) => {
+            const catIdx = item[1] as number;
+            // Map back to the generated category ID
+            const catId = categories[catIdx] ? categories[catIdx].id : categories[0]?.id || 'ui';
+            
+            return {
+                id: `snap_p_${idx}`,
+                title: item[0],
+                category: catId,
+                imageUrl: decompressUrl(item[2]),
+                mediaType: item[3] === 1 ? 'video' : 'image',
+                date: ''
+            };
+        });
 
         return { user, theme, categories, scheduleSlots, portfolio };
     } catch (e) {
@@ -228,7 +261,6 @@ const unpackData = (packed: any[]): Partial<AppData> => {
         return {};
     }
 };
-
 
 const App: React.FC = () => {
   const [view, setView] = useState<ViewState>('portfolio');
@@ -241,6 +273,7 @@ const App: React.FC = () => {
   const [showShareModal, setShowShareModal] = useState(false);
   const [shareUrl, setShareUrl] = useState('');
   const [linkCopied, setLinkCopied] = useState(false);
+  const [urlLength, setUrlLength] = useState(0);
 
   // Destructure
   const { user, categories, portfolio, scheduleSlots, importTemplates, theme, portfolioLayout } = data;
@@ -321,11 +354,11 @@ const App: React.FC = () => {
     }
   }, [theme.customFontUrl]);
 
-  // --- 4. Share Logic (Ultra Compression) ---
+  // --- 4. Share Logic (Ultra Compression V2) ---
   const handleShare = useCallback(() => {
       if (window.LZString) {
           try {
-              // Use the new PACK function to create an array-based structure
+              // Use the new V2 PACK function
               const miniData = packData(data);
               
               const json = JSON.stringify(miniData);
@@ -333,12 +366,11 @@ const App: React.FC = () => {
               
               const url = new URL(window.location.href);
               url.searchParams.set('mode', 'visitor');
-              // We don't even need 'artist' param anymore as it's inside the data, 
-              // but keeping it for URL preview niceness is optional. Let's remove to save space.
-              // url.searchParams.set('artist', user.name); 
               url.searchParams.set('data', compressed);
               
-              setShareUrl(url.toString());
+              const finalUrl = url.toString();
+              setShareUrl(finalUrl);
+              setUrlLength(finalUrl.length);
               setShowShareModal(true);
 
           } catch (e) {
@@ -350,7 +382,7 @@ const App: React.FC = () => {
       }
   }, [data]);
 
-  // Update Handlers
+  // Update Handlers (Wrapped in useCallback)
   const updateData = useCallback((updates: Partial<AppData>) => {
     setData(prev => ({ ...prev, ...updates, lastUpdated: new Date().toISOString() }));
   }, []);
@@ -523,15 +555,15 @@ const App: React.FC = () => {
                
                <div className="p-6 space-y-6 overflow-y-auto">
                    <div className="bg-emerald-50 border border-emerald-100 rounded-xl p-4 flex gap-3">
-                       <LinkIcon className="text-emerald-500 shrink-0 mt-0.5" size={18}/>
+                       <Scissors className="text-emerald-500 shrink-0 mt-0.5" size={18}/>
                        <div className="text-sm text-emerald-800 space-y-1">
-                           <p className="font-bold">极速链接已生成 (Ultra-Mini Link)</p>
-                           <p>数据已压缩 80%。已移除隐私信息（备注/详情/简介），仅保留核心展示内容。</p>
+                           <p className="font-bold">深度压缩成功 (Ultra-Lite Mode Active)</p>
+                           <p>链接长度已压缩 {urlLength > 0 ? 'to ' + urlLength + ' chars' : ''}。仅保留核心展示数据。</p>
                        </div>
                    </div>
 
                    <div className="space-y-2">
-                       <label className="text-xs font-bold text-slate-500 uppercase">Snapshot Link</label>
+                       <label className="text-xs font-bold text-slate-500 uppercase">Snapshot Link (Lite V2)</label>
                        <div className="flex gap-2">
                            <input 
                              readOnly 
@@ -550,8 +582,8 @@ const App: React.FC = () => {
                                {linkCopied ? 'Copied' : 'Copy'}
                            </button>
                        </div>
-                       <p className="text-[10px] text-slate-400">
-                           * 如链接依然太长，请检查是否使用了 Base64 图片（请尽量使用 URL）。
+                       <p className="text-[10px] text-slate-400 leading-tight">
+                           * 提示：为了获得最短链接，请在作品集和背景设置中尽量使用 URL (图床链接)，避免上传本地大文件。
                        </p>
                    </div>
 
