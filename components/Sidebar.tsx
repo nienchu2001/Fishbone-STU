@@ -1,6 +1,6 @@
 
 import React, { useState } from 'react';
-import { LayoutGrid, Calendar, Settings, Image as ImageIcon, Briefcase, Share2, LogOut, Check } from 'lucide-react';
+import { Calendar, Settings, Image as ImageIcon, Briefcase, Share2, LogOut, Check, Cloud } from 'lucide-react';
 import { ViewState, UserProfile } from '../types';
 
 interface SidebarProps {
@@ -8,10 +8,20 @@ interface SidebarProps {
   onChangeView: (view: ViewState) => void;
   user: UserProfile;
   isReadOnly?: boolean;
+  isVisitor?: boolean;
+  saveStatus?: 'saved' | 'saving';
   onToggleReadOnly?: () => void;
 }
 
-export const Sidebar: React.FC<SidebarProps> = ({ currentView, onChangeView, user, isReadOnly, onToggleReadOnly }) => {
+export const Sidebar: React.FC<SidebarProps> = ({ 
+  currentView, 
+  onChangeView, 
+  user, 
+  isReadOnly, 
+  isVisitor, 
+  saveStatus = 'saved',
+  onToggleReadOnly 
+}) => {
   const [showShareTooltip, setShowShareTooltip] = useState(false);
 
   const menuItems = [
@@ -39,6 +49,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentView, onChangeView, use
           <div className="w-12 h-12 lg:w-20 lg:h-20 rounded-full overflow-hidden ring-4 ring-white/50 shadow-lg transition-transform transform group-hover:scale-105 bg-slate-200">
             <img src={user.avatar} alt="Profile" className="w-full h-full object-cover" />
           </div>
+          {/* Online/Edit status dot - only for admin */}
           {!isReadOnly && (
             <div className="absolute bottom-0 right-0 w-4 h-4 bg-emerald-400 rounded-full border-2 border-white lg:hidden"></div>
           )}
@@ -98,35 +109,48 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentView, onChangeView, use
 
       {/* Action Buttons */}
       <div className="p-4 w-full space-y-4">
-        {!isReadOnly ? (
-          <div className="relative">
+        {/* Share Button - Hidden for Visitors */}
+        {!isVisitor && (
+          !isReadOnly ? (
+            <div className="relative">
+              <button 
+                onClick={handleShare}
+                className="w-full flex items-center justify-center gap-2 py-3 bg-slate-800 text-white rounded-xl font-bold shadow-lg hover:bg-slate-700 transition-all hover:-translate-y-0.5"
+              >
+                {showShareTooltip ? <Check size={18} /> : <Share2 size={18} />}
+                <span className="hidden lg:inline">{showShareTooltip ? '链接已复制' : '分享主页'}</span>
+              </button>
+              {showShareTooltip && (
+                <div className="absolute -top-14 left-1/2 -translate-x-1/2 bg-slate-900 text-white text-xs py-2 px-3 rounded-lg whitespace-nowrap animate-fade-in shadow-xl z-50">
+                  顾客链接已复制<br/>Link Copied!
+                </div>
+              )}
+            </div>
+          ) : (
+            // Exit Preview Button - Only for Admin previewing, NOT for Visitor
             <button 
-              onClick={handleShare}
-              className="w-full flex items-center justify-center gap-2 py-3 bg-slate-800 text-white rounded-xl font-bold shadow-lg hover:bg-slate-700 transition-all hover:-translate-y-0.5"
+              onClick={onToggleReadOnly}
+              className="w-full flex items-center justify-center gap-2 py-3 bg-white/50 text-slate-600 border border-slate-200 rounded-xl font-bold hover:bg-white transition-all"
             >
-              {showShareTooltip ? <Check size={18} /> : <Share2 size={18} />}
-              <span className="hidden lg:inline">{showShareTooltip ? '链接已复制' : '分享主页'}</span>
+              <LogOut size={18} />
+              <span className="hidden lg:inline">退出预览</span>
             </button>
-            {showShareTooltip && (
-              <div className="absolute -top-14 left-1/2 -translate-x-1/2 bg-slate-900 text-white text-xs py-2 px-3 rounded-lg whitespace-nowrap animate-fade-in shadow-xl z-50">
-                顾客链接已复制<br/>Link Copied!
-              </div>
-            )}
-          </div>
-        ) : (
-          <button 
-            onClick={onToggleReadOnly}
-            className="w-full flex items-center justify-center gap-2 py-3 bg-white/50 text-slate-600 border border-slate-200 rounded-xl font-bold hover:bg-white transition-all"
-          >
-            <LogOut size={18} />
-            <span className="hidden lg:inline">退出预览</span>
-          </button>
+          )
         )}
 
+        {/* Contact Info */}
         <div className="hidden lg:block bg-white/40 backdrop-blur-sm rounded-2xl p-4 border border-white/50 shadow-sm">
           <p className="text-[10px] text-slate-400 font-bold mb-1 uppercase tracking-wider">CONTACT</p>
           <p className="text-xs text-slate-600 font-medium truncate opacity-80" title={user.contact}>{user.contact}</p>
         </div>
+
+        {/* Auto-Save Indicator (Only for Admin) */}
+        {!isVisitor && (
+           <div className={`hidden lg:flex items-center justify-center gap-1.5 text-[10px] font-bold transition-colors ${saveStatus === 'saving' ? 'text-blue-500' : 'text-slate-300'}`}>
+              <Cloud size={12} className={saveStatus === 'saving' ? 'animate-pulse' : ''}/>
+              {saveStatus === 'saving' ? 'Saving...' : 'Data Synced'}
+           </div>
+        )}
       </div>
     </aside>
   );

@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Sidebar } from './components/Sidebar';
 import { PortfolioGrid } from './components/PortfolioGrid';
 import { ScheduleBoard } from './components/ScheduleBoard';
@@ -9,7 +9,7 @@ import { ViewState, UserProfile, BusinessCategory, PortfolioItem, CommissionSlot
 
 const STORAGE_KEY = 'artflow_data_v1';
 
-// Initial Mock Data (Used only if no local storage found)
+// Initial Mock Data (Used as fallback or for new users)
 const INITIAL_USER: UserProfile = {
   name: "Clover Art",
   avatar: "https://picsum.photos/seed/artist2/200/200",
@@ -99,25 +99,28 @@ const INITIAL_THEME: ThemeSettings = {
 
 const STATUS_ORDER: CommissionStatus[] = ['waiting', 'typography', 'motion', 'color_fx', 'export', 'finished'];
 
-// Helper to load initial state
+// Robust Data Loading
 const loadInitialState = (): AppData => {
   try {
     const saved = localStorage.getItem(STORAGE_KEY);
     if (saved) {
       const parsed = JSON.parse(saved);
+      // Data Merging Strategy:
+      // If saved data exists, we prefer it.
+      // However, if the schema updated (new fields added), we use defaults for missing fields to prevent crashes.
       return {
-        user: parsed.user || INITIAL_USER,
-        categories: parsed.categories || INITIAL_CATEGORIES,
-        portfolio: parsed.portfolio || INITIAL_PORTFOLIO,
-        scheduleSlots: parsed.scheduleSlots || INITIAL_SLOTS,
-        importTemplates: parsed.importTemplates || INITIAL_TEMPLATES,
-        theme: { ...INITIAL_THEME, ...parsed.theme }, // Merge to ensure new fields exist
+        user: { ...INITIAL_USER, ...parsed.user },
+        categories: Array.isArray(parsed.categories) ? parsed.categories : INITIAL_CATEGORIES,
+        portfolio: Array.isArray(parsed.portfolio) ? parsed.portfolio : INITIAL_PORTFOLIO,
+        scheduleSlots: Array.isArray(parsed.scheduleSlots) ? parsed.scheduleSlots : INITIAL_SLOTS,
+        importTemplates: Array.isArray(parsed.importTemplates) ? parsed.importTemplates : INITIAL_TEMPLATES,
+        theme: { ...INITIAL_THEME, ...parsed.theme },
         portfolioLayout: parsed.portfolioLayout || 'masonry',
         lastUpdated: parsed.lastUpdated || new Date().toISOString()
       };
     }
   } catch (e) {
-    console.error("Failed to load saved data", e);
+    console.warn("Could not load local storage data, reverting to defaults.", e);
   }
   return {
     user: INITIAL_USER,
@@ -134,6 +137,8 @@ const loadInitialState = (): AppData => {
 const App: React.FC = () => {
   const [view, setView] = useState<ViewState>('portfolio');
   const [isReadOnly, setIsReadOnly] = useState(false);
+  const [isVisitor, setIsVisitor] = useState(false); // True if via ?mode=visitor
+  const [saveStatus, setSaveStatus] = useState<'saved' | 'saving'>('saved');
   
   // Initialize State
   const [data, setData] = useState<AppData>(loadInitialState);
@@ -141,9 +146,28 @@ const App: React.FC = () => {
   // Destructure for easier access
   const { user, categories, portfolio, scheduleSlots, importTemplates, theme, portfolioLayout } = data;
 
-  // Persistence Effect
+  // Persistence Effect with Auto-Save Indicator
+  const isFirstRender = useRef(true);
   useEffect(() => {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+    if (isFirstRender.current) {
+      isFirstRender.current = false;
+      return;
+    }
+
+    const save = async () => {
+      setSaveStatus('saving');
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+        // Add a small delay to show "saving" state for UX
+        setTimeout(() => setSaveStatus('saved'), 600);
+      } catch (e) {
+        console.error("Save failed", e);
+      }
+    };
+    
+    // Debounce save slightly to prevent thrashing on text inputs
+    const timer = setTimeout(save, 500);
+    return () => clearTimeout(timer);
   }, [data]);
 
   // Dynamic Font Injection Effect
@@ -165,10 +189,7 @@ const App: React.FC = () => {
             }
         `;
     } else {
-        // Cleanup if no custom font
-        if (styleTag) {
-            styleTag.remove();
-        }
+        if (styleTag) styleTag.remove();
     }
   }, [theme.customFontUrl]);
 
@@ -177,6 +198,7 @@ const App: React.FC = () => {
     const params = new URLSearchParams(window.location.search);
     if (params.get('mode') === 'visitor') {
       setIsReadOnly(true);
+      setIsVisitor(true);
     }
   }, []);
 
@@ -219,7 +241,6 @@ const App: React.FC = () => {
     updateData({
       scheduleSlots: scheduleSlots.map(slot => {
         if (slot.id !== id) return slot;
-        
         const currentIndex = STATUS_ORDER.indexOf(slot.status);
         if (currentIndex < STATUS_ORDER.length - 1) {
           const nextStatus = STATUS_ORDER[currentIndex + 1];
@@ -255,14 +276,19 @@ const App: React.FC = () => {
       try {
         const json = e.target?.result as string;
         const parsed = JSON.parse(json);
-        // Basic validation
         if (parsed.user && Array.isArray(parsed.portfolio)) {
-          // Backward compatibility
-          if (!parsed.importTemplates) parsed.importTemplates = INITIAL_TEMPLATES;
-          if (!parsed.theme) parsed.theme = INITIAL_THEME;
-          if (!parsed.portfolioLayout) parsed.portfolioLayout = 'masonry';
-          
-          setData(parsed);
+          // Robust merge during import as well
+          const safeData: AppData = {
+              user: { ...INITIAL_USER, ...parsed.user },
+              categories: parsed.categories || INITIAL_CATEGORIES,
+              portfolio: parsed.portfolio || INITIAL_PORTFOLIO,
+              scheduleSlots: parsed.scheduleSlots || INITIAL_SLOTS,
+              importTemplates: parsed.importTemplates || INITIAL_TEMPLATES,
+              theme: { ...INITIAL_THEME, ...parsed.theme },
+              portfolioLayout: parsed.portfolioLayout || 'masonry',
+              lastUpdated: new Date().toISOString()
+          };
+          setData(safeData);
           alert("数据导入成功！Backup restored successfully.");
         } else {
           alert("无效的备份文件 Invalid backup file.");
@@ -275,6 +301,9 @@ const App: React.FC = () => {
   };
 
   const handleToggleReadOnly = () => {
+    // If in strict visitor mode, user cannot toggle read-only off.
+    if (isVisitor) return;
+    
     setIsReadOnly(!isReadOnly);
     if (!isReadOnly) setView('portfolio');
   };
@@ -298,7 +327,7 @@ const App: React.FC = () => {
     backgroundPosition: 'center',
     backgroundRepeat: 'no-repeat',
     backgroundAttachment: 'fixed',
-  } : {}; // Fallback to CSS default
+  } : {}; 
 
   return (
     <div className="min-h-screen text-slate-800 flex transition-all duration-500" 
@@ -314,6 +343,8 @@ const App: React.FC = () => {
           onChangeView={setView} 
           user={user} 
           isReadOnly={isReadOnly}
+          isVisitor={isVisitor}
+          saveStatus={saveStatus}
           onToggleReadOnly={handleToggleReadOnly}
         />
         
