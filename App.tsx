@@ -161,8 +161,8 @@ const mapIntToStatus = (i: number) => STATUS_ORDER[i] || 'waiting';
 // Pack Data into Ultra-Lite Array V3
 const packData = (data: AppData): any[] => {
     // 1. User: [name, contact, avatar_url_only]
-    // STRIP BASE64 AVATARS to save massive space
-    const safeAvatar = data.user.avatar.startsWith('data:') ? '' : compressUrl(data.user.avatar);
+    // ALLOW Base64 Avatars now (removed stripping)
+    const safeAvatar = compressUrl(data.user.avatar);
     
     const u = [
         data.user.name, 
@@ -171,8 +171,8 @@ const packData = (data: AppData): any[] => {
     ];
 
     // 2. Theme: [bg_url_only, font_idx, opacity, custom_font_url]
-    // STRIP BASE64 BACKGROUNDS
-    const safeBg = data.theme.backgroundImage.startsWith('data:') ? '' : compressUrl(data.theme.backgroundImage);
+    // ALLOW Base64 Backgrounds now (removed stripping)
+    const safeBg = compressUrl(data.theme.backgroundImage);
     
     const fontIdx = Math.max(0, FONT_ORDER.indexOf(data.theme.font));
     const t = [
@@ -196,7 +196,8 @@ const packData = (data: AppData): any[] => {
     // 5. Portfolio: [[title, cat_index, url_only, type_int]]
     const catIdToIndex = new Map(data.categories.map((c, i) => [c.id, i]));
     const p = data.portfolio.map(item => {
-        // Strip Base64 images from portfolio too
+        // STILL STRIP Base64 images from portfolio to prevent massive link explosion
+        // Portfolio items are too numerous to include base64
         if (item.imageUrl.startsWith('data:')) return null;
         
         const catIdx = catIdToIndex.get(item.category) ?? 0;
@@ -220,14 +221,11 @@ const unpackData = (packed: any[]): Partial<AppData> => {
             ...INITIAL_USER,
             name: u[0] || INITIAL_USER.name,
             contact: u[1] || INITIAL_USER.contact,
-            avatar: decompressUrl(u[2]) || `https://ui-avatars.com/api/?name=${encodeURIComponent(u[0] || 'A')}&background=random`, // Fallback avatar
+            avatar: decompressUrl(u[2]) || `https://ui-avatars.com/api/?name=${encodeURIComponent(u[0] || 'A')}&background=random`, 
             bio: "" 
         };
 
         // Unpack Theme
-        // Fallback Gradient Generation if BG is missing (because it was stripped)
-        const fallbackBg = !t[0] ? `https://ui-avatars.com/api/?name=${encodeURIComponent(user.name)}&background=random&size=1920` : ''; 
-        
         const theme: ThemeSettings = {
             ...INITIAL_THEME,
             backgroundImage: decompressUrl(t[0]),
@@ -657,14 +655,16 @@ const App: React.FC = () => {
                        </div>
                        
                        {shortLinkError && (
-                           <p className="text-xs text-red-500 font-bold">
-                               生成失败 (可能是网络原因)。请尝试复制长链接，或手动使用 tinyurl.com 转换。
+                           <p className="text-xs text-red-500 font-bold bg-red-50 p-2 rounded-lg border border-red-100">
+                               ⚠ 生成失败：您的本地头像/背景图太大，导致链接过长。<br/>
+                               Shortening failed: Images too large.<br/>
+                               <span className="font-normal text-slate-600">请使用长链接(Snapshot Link)分享，或在设置中使用外部图床链接替换本地图片。</span>
                            </p>
                        )}
                        
                        <p className="text-[10px] text-slate-400 leading-tight pl-1">
-                           * 长链接包含了您的所有网页数据（不含本地大图）。<br/>
-                           * “转为短链”功能将调用公共服务生成 &lt; 30 字符的永久链接。
+                           * 长链接已包含您的头像和背景图（Base64）。<br/>
+                           * 若“转为短链”失败，通常是因为您使用了本地上传的大图。请改用图床链接。
                        </p>
                    </div>
 
