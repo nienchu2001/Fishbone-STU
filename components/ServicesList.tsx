@@ -1,20 +1,30 @@
+
 import React, { useState } from 'react';
-import { BusinessCategory } from '../types';
-import { ChevronDown, ChevronUp, Sparkles, Check, ArrowRight } from 'lucide-react';
+import { BusinessCategory, UserProfile } from '../types';
+import { ChevronDown, ChevronUp, Sparkles, Check, ArrowRight, X, MessageCircle, Copy } from 'lucide-react';
 
 interface ServicesListProps {
   categories: BusinessCategory[];
+  user: UserProfile;
 }
 
-export const ServicesList: React.FC<ServicesListProps> = ({ categories }) => {
+export const ServicesList: React.FC<ServicesListProps> = ({ categories, user }) => {
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [showContactModal, setShowContactModal] = useState(false);
+  const [copied, setCopied] = useState(false);
 
   const toggleExpand = (id: string) => {
     setExpandedId(expandedId === id ? null : id);
   };
 
+  const handleCopyContact = () => {
+    navigator.clipboard.writeText(user.contact);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
   return (
-    <div className="space-y-8 animate-fade-in">
+    <div className="space-y-8 animate-fade-in relative">
       <div>
         <h2 className="text-3xl font-bold text-slate-800 tracking-tight">Services</h2>
         <p className="text-slate-500 mt-2 font-light">橙光/易次元/AVG游戏美术定制</p>
@@ -70,7 +80,10 @@ export const ServicesList: React.FC<ServicesListProps> = ({ categories }) => {
                   {cat.details || "暂无详细说明，请联系咨询。"}
                 </div>
                 <div className="px-8 pb-8">
-                    <button className="w-full py-3.5 bg-slate-800 text-white font-bold rounded-2xl hover:bg-slate-700 transition-all shadow-lg hover:shadow-xl hover:-translate-y-0.5 flex items-center justify-center gap-2">
+                    <button 
+                        onClick={() => setShowContactModal(true)}
+                        className="w-full py-3.5 bg-slate-800 text-white font-bold rounded-2xl hover:bg-slate-700 transition-all shadow-lg hover:shadow-xl hover:-translate-y-0.5 flex items-center justify-center gap-2"
+                    >
                         立即咨询 / 预约 <ArrowRight size={18} />
                     </button>
                 </div>
@@ -79,6 +92,53 @@ export const ServicesList: React.FC<ServicesListProps> = ({ categories }) => {
           );
         })}
       </div>
+
+      {/* Contact Modal */}
+      {showContactModal && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/20 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="bg-white/90 rounded-3xl shadow-2xl w-full max-w-sm border border-white/60 p-6 relative animate-in zoom-in-95 duration-200">
+            <button 
+                onClick={() => setShowContactModal(false)}
+                className="absolute top-4 right-4 p-2 hover:bg-slate-100 rounded-full text-slate-400 hover:text-slate-600 transition-colors"
+            >
+                <X size={20}/>
+            </button>
+
+            <div className="flex flex-col items-center text-center mt-4">
+                <div className="w-24 h-24 rounded-full p-1 bg-gradient-to-br from-primary-200 to-blue-200 shadow-lg mb-4">
+                    <img src={user.avatar} className="w-full h-full rounded-full object-cover border-4 border-white"/>
+                </div>
+                
+                <h3 className="text-xl font-bold text-slate-800 mb-1">{user.name}</h3>
+                <p className="text-xs font-bold text-primary-500 bg-primary-50 px-3 py-1 rounded-full mb-6">欢迎咨询 / Welcome</p>
+
+                <div className="w-full bg-slate-50 rounded-2xl p-4 border border-slate-100 mb-6">
+                    <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mb-2">联系方式 Contact</p>
+                    <div className="flex items-center justify-between gap-2 bg-white p-3 rounded-xl border border-slate-200 shadow-sm">
+                        <div className="flex items-center gap-3 overflow-hidden">
+                            <div className="w-8 h-8 rounded-lg bg-green-100 flex items-center justify-center text-green-600 shrink-0">
+                                <MessageCircle size={18}/>
+                            </div>
+                            <span className="text-sm font-bold text-slate-700 truncate">{user.contact}</span>
+                        </div>
+                        <button 
+                            onClick={handleCopyContact}
+                            className="p-2 hover:bg-slate-100 rounded-lg text-slate-400 hover:text-primary-600 transition-colors"
+                            title="复制 Copy"
+                        >
+                            {copied ? <Check size={18} className="text-green-500"/> : <Copy size={18}/>}
+                        </button>
+                    </div>
+                </div>
+
+                <p className="text-xs text-slate-400 leading-relaxed px-4">
+                    * 请注明来意 (例如：咨询UI定制)<br/>
+                    Please mention your purpose when adding.
+                </p>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

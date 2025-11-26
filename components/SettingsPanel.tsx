@@ -1,7 +1,6 @@
-
 import React, { useState, useRef } from 'react';
 import { UserProfile, BusinessCategory, PortfolioItem, MediaType, ThemeSettings, FontStyle } from '../types';
-import { Save, Plus, Trash2, Image, Film, Sparkles, UploadCloud, Download, FileJson, Palette, Type, LayoutTemplate, Monitor, Smartphone, Minimize } from 'lucide-react';
+import { Save, Plus, Trash2, Image, Film, Sparkles, UploadCloud, Download, FileJson, Palette, Type, LayoutTemplate, Monitor, Smartphone, Minimize, Loader2 } from 'lucide-react';
 
 interface SettingsPanelProps {
   user: UserProfile;
@@ -16,6 +15,45 @@ interface SettingsPanelProps {
   onExportData: () => void;
   onImportData: (file: File) => void;
 }
+
+// Utility to compress images to avoid freezing localStorage
+const compressImage = (file: File, maxWidth: number, quality: number = 0.7): Promise<string> => {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.readAsDataURL(file);
+    reader.onload = (event) => {
+      const img = new window.Image();
+      img.src = event.target?.result as string;
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        let width = img.width;
+        let height = img.height;
+
+        // Calculate new dimensions
+        if (width > maxWidth) {
+          height = (height * maxWidth) / width;
+          width = maxWidth;
+        }
+
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+            ctx.drawImage(img, 0, 0, width, height);
+            // Use JPEG for background/large photos to save space (unless it needs transparency)
+            // If original is PNG, we might want to keep transparency for avatars, but for backgrounds JPEG is safer for size.
+            // Here we prioritize size/performance.
+            const outputType = file.type === 'image/png' && maxWidth < 500 ? 'image/png' : 'image/jpeg';
+            resolve(canvas.toDataURL(outputType, quality));
+        } else {
+            reject(new Error("Canvas context failed"));
+        }
+      };
+      img.onerror = (err) => reject(err);
+    };
+    reader.onerror = (err) => reject(err);
+  });
+};
 
 export const SettingsPanel: React.FC<SettingsPanelProps> = ({ 
   user, 
@@ -35,6 +73,10 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
   const [localCategories, setLocalCategories] = useState(categories);
   const [localTheme, setLocalTheme] = useState(theme);
   
+  // Loading states
+  const [isProcessingAvatar, setIsProcessingAvatar] = useState(false);
+  const [isProcessingBg, setIsProcessingBg] = useState(false);
+  
   const fileInputRef = useRef<HTMLInputElement>(null);
   const importInputRef = useRef<HTMLInputElement>(null);
   const bgInputRef = useRef<HTMLInputElement>(null);
@@ -48,12 +90,12 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
 
   const handleSaveProfile = () => {
     onUpdateUser(userData);
-    alert('个人资料已保存！');
+    alert('个人资料已保存！\nProfile saved successfully.');
   };
 
   const handleSaveCategories = () => {
     onUpdateCategories(localCategories);
-    alert('业务设置已保存！');
+    alert('业务设置已保存！\nServices saved successfully.');
   };
 
   const handleSaveTheme = () => {
@@ -91,25 +133,37 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
     setNewItem({ ...newItem, title: '', url: '' });
   };
 
-  const handleAvatarUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleAvatarUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        setUserData({...userData, avatar: reader.result as string});
-      };
-      reader.readAsDataURL(file);
+      try {
+        setIsProcessingAvatar(true);
+        // Compress avatar to max width 300px
+        const compressedBase64 = await compressImage(file, 300, 0.8);
+        setUserData({...userData, avatar: compressedBase64});
+      } catch (error) {
+        console.error("Avatar compression failed", error);
+        alert("图片处理失败，请重试。\nImage processing failed.");
+      } finally {
+        setIsProcessingAvatar(false);
+      }
     }
   };
 
-  const handleBgUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleBgUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        setLocalTheme({...localTheme, backgroundImage: reader.result as string});
-      };
-      reader.readAsDataURL(file);
+      try {
+        setIsProcessingBg(true);
+        // Compress background to max width 1920px and lower quality for performance
+        const compressedBase64 = await compressImage(file, 1920, 0.6);
+        setLocalTheme({...localTheme, backgroundImage: compressedBase64});
+      } catch (error) {
+        console.error("Background compression failed", error);
+        alert("图片处理失败，请重试。\nImage processing failed.");
+      } finally {
+        setIsProcessingBg(false);
+      }
     }
   };
 
@@ -154,13 +208,21 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                 <label className="text-xs font-bold text-slate-500 uppercase tracking-wider ml-1">头像 / Avatar</label>
                 <div className="flex gap-6 items-center">
                   <div 
-                    onClick={() => fileInputRef.current?.click()}
+                    onClick={() => !isProcessingAvatar && fileInputRef.current?.click()}
                     className="w-24 h-24 rounded-full overflow-hidden bg-slate-100 shrink-0 border-4 border-white shadow-md relative group cursor-pointer"
                   >
-                    <img src={userData.avatar} alt="Preview" className="w-full h-full object-cover group-hover:opacity-50 transition-opacity" />
-                    <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
-                      <UploadCloud className="text-slate-700" size={24} />
-                    </div>
+                    {isProcessingAvatar ? (
+                        <div className="w-full h-full flex items-center justify-center bg-slate-200">
+                             <Loader2 className="animate-spin text-slate-500" />
+                        </div>
+                    ) : (
+                        <>
+                            <img src={userData.avatar} alt="Preview" className="w-full h-full object-cover group-hover:opacity-50 transition-opacity" />
+                            <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                            <UploadCloud className="text-slate-700" size={24} />
+                            </div>
+                        </>
+                    )}
                   </div>
                   <input 
                     type="file"
@@ -169,9 +231,10 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                     accept="image/*"
                     className="hidden"
                   />
-                  <div className="flex flex-col gap-2">
+                  <div className="flex flex-col gap-1">
                     <p className="text-sm font-bold text-slate-700">点击头像上传新图片</p>
-                    <p className="text-xs text-slate-400">支持 JPG, PNG, GIF</p>
+                    <p className="text-xs text-slate-400">支持 JPG, PNG, GIF (会自动压缩优化)</p>
+                    <p className="text-[10px] text-emerald-600/80 font-bold bg-emerald-50 inline-block px-1.5 py-0.5 rounded border border-emerald-100 mt-1 w-fit">推荐尺寸: 500x500px, 大小 &lt; 2MB</p>
                   </div>
                 </div>
               </div>
@@ -236,7 +299,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                           <div className="flex flex-col md:flex-row gap-6 items-start">
                               <div className="flex flex-col gap-3 items-center">
                                 {localTheme.backgroundImage ? (
-                                    <div className="w-48 h-28 rounded-xl overflow-hidden border-2 border-slate-200 shadow-md relative group">
+                                    <div className="w-48 h-28 rounded-xl overflow-hidden border-2 border-slate-200 shadow-md relative group bg-slate-100">
                                         <img src={localTheme.backgroundImage} className="w-full h-full object-cover"/>
                                         <button 
                                           onClick={() => setLocalTheme({...localTheme, backgroundImage: ''})}
@@ -250,9 +313,17 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                                         默认背景 Default
                                     </div>
                                 )}
-                                <button onClick={() => bgInputRef.current?.click()} className="px-4 py-2 bg-white border border-slate-200 rounded-lg text-sm font-bold text-slate-600 hover:bg-slate-50 flex items-center gap-2 shadow-sm">
-                                  <UploadCloud size={14}/> 上传新图片
-                                </button>
+                                <div className="flex flex-col items-center gap-2">
+                                  <button 
+                                      onClick={() => !isProcessingBg && bgInputRef.current?.click()} 
+                                      disabled={isProcessingBg}
+                                      className="px-4 py-2 bg-white border border-slate-200 rounded-lg text-sm font-bold text-slate-600 hover:bg-slate-50 flex items-center gap-2 shadow-sm disabled:opacity-70"
+                                  >
+                                    {isProcessingBg ? <Loader2 size={14} className="animate-spin"/> : <UploadCloud size={14}/>} 
+                                    {isProcessingBg ? '处理中...' : '上传新图片'}
+                                  </button>
+                                  <p className="text-[10px] text-slate-400 font-medium">建议 1920x1080px, &lt; 5MB</p>
+                                </div>
                               </div>
 
                               <div className="flex-1 w-full space-y-4">

@@ -1,6 +1,6 @@
 
 import React, { useState } from 'react';
-import { LayoutGrid, Calendar, Settings, Image as ImageIcon, Briefcase, Share2, LogOut } from 'lucide-react';
+import { LayoutGrid, Calendar, Settings, Image as ImageIcon, Briefcase, Share2, LogOut, Check } from 'lucide-react';
 import { ViewState, UserProfile } from '../types';
 
 interface SidebarProps {
@@ -21,16 +21,15 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentView, onChangeView, use
   ] as const;
 
   const handleShare = () => {
-    // In a real app with backend, this would generate a unique link.
-    // Here we simulate copying the current URL.
-    navigator.clipboard.writeText(window.location.href);
-    setShowShareTooltip(true);
-    setTimeout(() => setShowShareTooltip(false), 2000);
-    
-    // Switch to read only mode to preview
-    if (onToggleReadOnly && !isReadOnly) {
-      onToggleReadOnly();
-    }
+    // Generate a URL with the visitor mode parameter
+    const url = new URL(window.location.href);
+    url.searchParams.set('mode', 'visitor');
+    const shareableLink = url.toString();
+
+    navigator.clipboard.writeText(shareableLink).then(() => {
+      setShowShareTooltip(true);
+      setTimeout(() => setShowShareTooltip(false), 2500);
+    });
   };
 
   return (
@@ -105,12 +104,12 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentView, onChangeView, use
               onClick={handleShare}
               className="w-full flex items-center justify-center gap-2 py-3 bg-slate-800 text-white rounded-xl font-bold shadow-lg hover:bg-slate-700 transition-all hover:-translate-y-0.5"
             >
-              <Share2 size={18} />
-              <span className="hidden lg:inline">分享主页</span>
+              {showShareTooltip ? <Check size={18} /> : <Share2 size={18} />}
+              <span className="hidden lg:inline">{showShareTooltip ? '链接已复制' : '分享主页'}</span>
             </button>
             {showShareTooltip && (
-              <div className="absolute -top-12 left-1/2 -translate-x-1/2 bg-black/80 text-white text-xs py-1 px-3 rounded-lg whitespace-nowrap animate-fade-in">
-                已进入预览模式
+              <div className="absolute -top-14 left-1/2 -translate-x-1/2 bg-slate-900 text-white text-xs py-2 px-3 rounded-lg whitespace-nowrap animate-fade-in shadow-xl z-50">
+                顾客链接已复制<br/>Link Copied!
               </div>
             )}
           </div>

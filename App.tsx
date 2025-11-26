@@ -353,7 +353,7 @@ const App: React.FC = () => {
               )}
 
               {view === 'services' && (
-                 <ServicesList categories={categories} />
+                 <ServicesList categories={categories} user={user} />
               )}
               
               {view === 'settings' && !isReadOnly && (
