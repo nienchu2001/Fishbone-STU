@@ -478,8 +478,8 @@ const INITIAL_TEMPLATES: ImportTemplate[] = ${JSON.stringify(templates || [], nu
                 <div className="bg-blue-50 p-2 rounded-lg flex gap-2 items-start">
                     <Info size={14} className="text-blue-500 mt-0.5 shrink-0"/>
                     <p className="text-xs text-blue-600 leading-tight">
-                        提示：使用 "Snapshot Share" 分享时，上传的本地文件(Base64)可能因为太长而无法在链接中显示。
-                        <br/>建议使用外部链接(URL)以获得最佳分享体验。
+                        <strong>推荐 (Recommended):</strong> 使用外部链接(URL)可以大幅缩短分享链接的长度。
+                        <br/>上传本地文件会生成超长代码，在"快照分享"时可能会被系统自动剔除。
                     </p>
                 </div>
               </div>

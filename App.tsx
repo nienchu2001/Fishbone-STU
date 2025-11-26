@@ -113,7 +113,31 @@ const loadInitialState = (): AppData => {
   return DEFAULT_STATE;
 };
 
-// --- ULTRA COMPRESSION HELPERS V2 ---
+// --- ULTRA COMPRESSION HELPERS V3 (Base36 Dates & Aggressive Stripping) ---
+
+const BASE_DATE = new Date('2023-01-01').getTime();
+const DAY_MS = 86400000;
+
+// Compress Date: 2024-05-20 -> Days from 2023-01-01 -> Base36
+const compressDateBase36 = (dateStr: string) => {
+    if (!dateStr || dateStr === 'TBD') return '';
+    try {
+        const d = new Date(dateStr).getTime();
+        const diffDays = Math.floor((d - BASE_DATE) / DAY_MS);
+        if (isNaN(diffDays)) return '';
+        return Math.max(0, diffDays).toString(36);
+    } catch (e) { return ''; }
+};
+
+// Decompress Date
+const decompressDateBase36 = (base36: string) => {
+    if (!base36) return 'TBD';
+    try {
+        const diffDays = parseInt(base36, 36);
+        const targetDate = new Date(BASE_DATE + diffDays * DAY_MS);
+        return targetDate.toISOString().split('T')[0];
+    } catch (e) { return 'TBD'; }
+};
 
 // 1. URL Protocol Stripping (Saves 8 chars per URL)
 // Replaces 'https://' with '$'
@@ -130,57 +154,51 @@ const decompressUrl = (url: string) => {
     return url;
 };
 
-// 2. Date Compression (Saves 2-4 chars)
-// 2024-12-25 -> 241225
-const compressDate = (date: string) => {
-    if (!date || date === 'TBD') return '';
-    return date.replace(/^20/, '').replace(/-/g, ''); // 2024-01-01 -> 240101
-};
-const decompressDate = (short: string) => {
-    if (!short) return 'TBD';
-    if (short.length !== 6) return short;
-    return `20${short.slice(0,2)}-${short.slice(2,4)}-${short.slice(4,6)}`;
-};
-
 // Map string status to integer 0-5
 const mapStatusToInt = (s: string) => Math.max(0, STATUS_ORDER.indexOf(s as CommissionStatus));
 const mapIntToStatus = (i: number) => STATUS_ORDER[i] || 'waiting';
 
-// Pack Data into Ultra-Lite Array
-// Structure: [ UserArr, ThemeArr, CatsArr, SlotsArr, PortfolioArr ]
+// Pack Data into Ultra-Lite Array V3
 const packData = (data: AppData): any[] => {
-    // 1. User: [name, contact, compressed_avatar]
+    // 1. User: [name, contact, avatar_url_only]
+    // STRIP BASE64 AVATARS to save massive space
+    const safeAvatar = data.user.avatar.startsWith('data:') ? '' : compressUrl(data.user.avatar);
+    
     const u = [
         data.user.name, 
         data.user.contact, 
-        compressUrl(data.user.avatar)
+        safeAvatar
     ];
 
-    // 2. Theme: [compressed_bg, font_idx, opacity, compressed_custom_font]
+    // 2. Theme: [bg_url_only, font_idx, opacity, custom_font_url]
+    // STRIP BASE64 BACKGROUNDS
+    const safeBg = data.theme.backgroundImage.startsWith('data:') ? '' : compressUrl(data.theme.backgroundImage);
+    
     const fontIdx = Math.max(0, FONT_ORDER.indexOf(data.theme.font));
     const t = [
-        compressUrl(data.theme.backgroundImage),
+        safeBg,
         fontIdx,
-        Math.round(data.theme.overlayOpacity * 100), // Store as integer 0-100
+        Math.round(data.theme.overlayOpacity * 100),
         compressUrl(data.theme.customFontUrl || '')
     ];
 
-    // 3. Categories: [[name, price]] (Implicit Index ID)
+    // 3. Categories: [[name, price]]
     const c = data.categories.map(cat => [cat.name, cat.priceRange]);
 
-    // 4. Slots: [[name, status_int, compressed_date]]
-    // Removed Type (Customer just needs to see if a slot is taken or progress)
+    // 4. Slots: [[name, status_int, date_base36]]
+    // Using Base36 Date compression
     const s = data.scheduleSlots.map(slot => [
         slot.clientName,
         mapStatusToInt(slot.status),
-        compressDate(slot.deadline)
+        compressDateBase36(slot.deadline)
     ]);
 
-    // 5. Portfolio: [[title, cat_index, compressed_url, is_video_int]]
-    // Map category ID to Index to save space
+    // 5. Portfolio: [[title, cat_index, url_only, type_int]]
     const catIdToIndex = new Map(data.categories.map((c, i) => [c.id, i]));
-    
     const p = data.portfolio.map(item => {
+        // Strip Base64 images from portfolio too
+        if (item.imageUrl.startsWith('data:')) return null;
+        
         const catIdx = catIdToIndex.get(item.category) ?? 0;
         return [
             item.title,
@@ -188,7 +206,7 @@ const packData = (data: AppData): any[] => {
             compressUrl(item.imageUrl),
             item.mediaType === 'video' ? 1 : 0
         ];
-    }).filter(item => item[2] && (item[2] as string).length < 200); // Filter out massive base64s, keep only URLs or short strings
+    }).filter(Boolean); // Remove nulls
 
     return [u, t, c, s, p];
 };
@@ -202,11 +220,15 @@ const unpackData = (packed: any[]): Partial<AppData> => {
             ...INITIAL_USER,
             name: u[0] || INITIAL_USER.name,
             contact: u[1] || INITIAL_USER.contact,
-            avatar: decompressUrl(u[2]),
-            bio: "" // Lite mode hides bio
+            avatar: decompressUrl(u[2]) || `https://ui-avatars.com/api/?name=${encodeURIComponent(u[0] || 'A')}&background=random`, // Fallback avatar
+            bio: "" 
         };
 
         // Unpack Theme
+        // Fallback Gradient Generation if BG is missing (because it was stripped)
+        const fallbackBg = !t[0] ? `https://ui-avatars.com/api/?name=${encodeURIComponent(user.name)}&background=random&size=1920` : ''; 
+        // Note: Actually for BG we might just want CSS gradient in main app, but for now let's leave empty and let CSS handle default.
+        
         const theme: ThemeSettings = {
             ...INITIAL_THEME,
             backgroundImage: decompressUrl(t[0]),
@@ -215,36 +237,32 @@ const unpackData = (packed: any[]): Partial<AppData> => {
             customFontUrl: decompressUrl(t[3])
         };
 
-        // Unpack Categories (Reconstruct IDs from index)
         const categories: BusinessCategory[] = c.map((cat: any[], i: number) => ({
-            id: `cat_${i}`, // Generated ID
+            id: `cat_${i}`,
             name: cat[0],
             priceRange: cat[1],
             description: "",
             details: ""
         }));
 
-        // Unpack Slots
         const scheduleSlots: CommissionSlot[] = s.map((slot: any[], idx: number) => {
             const statusStr = mapIntToStatus(slot[1]);
+            // Calculate approximate progress based on status
             const progress = (slot[1] / 5) * 100;
             return {
                 id: `snap_s_${idx}`,
                 clientName: slot[0],
                 type: 'Commission', // Generic type
                 status: statusStr,
-                deadline: decompressDate(slot[2]),
+                deadline: decompressDateBase36(slot[2]), // Decompress Base36
                 progress: progress,
                 requirements: ""
             };
         });
 
-        // Unpack Portfolio
         const portfolio: PortfolioItem[] = p.map((item: any[], idx: number) => {
             const catIdx = item[1] as number;
-            // Map back to the generated category ID
             const catId = categories[catIdx] ? categories[catIdx].id : categories[0]?.id || 'ui';
-            
             return {
                 id: `snap_p_${idx}`,
                 title: item[0],
@@ -354,11 +372,11 @@ const App: React.FC = () => {
     }
   }, [theme.customFontUrl]);
 
-  // --- 4. Share Logic (Ultra Compression V2) ---
+  // --- 4. Share Logic (Ultra Compression V3) ---
   const handleShare = useCallback(() => {
       if (window.LZString) {
           try {
-              // Use the new V2 PACK function
+              // Use the new V3 PACK function
               const miniData = packData(data);
               
               const json = JSON.stringify(miniData);
@@ -557,13 +575,13 @@ const App: React.FC = () => {
                    <div className="bg-emerald-50 border border-emerald-100 rounded-xl p-4 flex gap-3">
                        <Scissors className="text-emerald-500 shrink-0 mt-0.5" size={18}/>
                        <div className="text-sm text-emerald-800 space-y-1">
-                           <p className="font-bold">深度压缩成功 (Ultra-Lite Mode Active)</p>
-                           <p>链接长度已压缩 {urlLength > 0 ? 'to ' + urlLength + ' chars' : ''}。仅保留核心展示数据。</p>
+                           <p className="font-bold">V3 极限压缩成功 (Ultra-Lite Compression)</p>
+                           <p>链接长度已优化至 {urlLength} 字符。系统自动剔除了本地大图，保留了核心数据。</p>
                        </div>
                    </div>
 
                    <div className="space-y-2">
-                       <label className="text-xs font-bold text-slate-500 uppercase">Snapshot Link (Lite V2)</label>
+                       <label className="text-xs font-bold text-slate-500 uppercase">Snapshot Link (Lite V3)</label>
                        <div className="flex gap-2">
                            <input 
                              readOnly 
@@ -583,7 +601,8 @@ const App: React.FC = () => {
                            </button>
                        </div>
                        <p className="text-[10px] text-slate-400 leading-tight">
-                           * 提示：为了获得最短链接，请在作品集和背景设置中尽量使用 URL (图床链接)，避免上传本地大文件。
+                           * 注意：若头像/背景图使用了本地上传(Base64)，为了链接长度已被自动剔除。顾客将看到默认美化占位符。<br/>
+                           * 想要完整图片效果？请在设置中使用 URL 图片链接，或使用下方的“部署代码”方案。
                        </p>
                    </div>
 
