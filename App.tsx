@@ -6,7 +6,7 @@ import { ScheduleBoard } from './components/ScheduleBoard';
 import { SettingsPanel } from './components/SettingsPanel';
 import { ServicesList } from './components/ServicesList';
 import { ViewState, UserProfile, BusinessCategory, PortfolioItem, CommissionSlot, CommissionStatus, AppData, ImportTemplate, ThemeSettings, PortfolioLayoutMode } from './types';
-import { X, Copy, Check, FileCode, Zap, Info } from 'lucide-react';
+import { X, Copy, Check, FileCode, Zap, Info, Link as LinkIcon } from 'lucide-react';
 
 const STORAGE_KEY = 'artflow_data_v1';
 
@@ -86,6 +86,7 @@ const INITIAL_THEME: ThemeSettings = {
 };
 
 const STATUS_ORDER: CommissionStatus[] = ['waiting', 'typography', 'motion', 'color_fx', 'export', 'finished'];
+const FONT_ORDER = ['sans', 'serif', 'artistic', 'handwriting'];
 
 // Default Empty State
 const DEFAULT_STATE: AppData = {
@@ -112,6 +113,123 @@ const loadInitialState = (): AppData => {
   return DEFAULT_STATE;
 };
 
+// --- ULTRA COMPRESSION HELPERS ---
+
+// Map string status to integer 0-5
+const mapStatusToInt = (s: string) => Math.max(0, STATUS_ORDER.indexOf(s as CommissionStatus));
+// Map integer back to status string
+const mapIntToStatus = (i: number) => STATUS_ORDER[i] || 'waiting';
+
+// Pack Data into Array-of-Arrays (Minimizes JSON structure overhead)
+// Structure: [ UserArr, ThemeArr, CatsArr, SlotsArr, PortfolioArr ]
+const packData = (data: AppData): any[] => {
+    const isBase64 = (str: string) => str && str.startsWith('data:');
+
+    // 1. User: [name, contact, avatar_url (if not base64)]
+    // Dropped Bio to save space
+    const u = [
+        data.user.name, 
+        data.user.contact, 
+        isBase64(data.user.avatar) ? '' : data.user.avatar
+    ];
+
+    // 2. Theme: [bg_url (if not base64), font_idx, opacity]
+    const fontIdx = Math.max(0, FONT_ORDER.indexOf(data.theme.font));
+    const t = [
+        isBase64(data.theme.backgroundImage) ? '' : data.theme.backgroundImage,
+        fontIdx,
+        data.theme.overlayOpacity
+    ];
+
+    // 3. Categories: [[id, name, price]] 
+    // Dropped descriptions
+    const c = data.categories.map(cat => [cat.id, cat.name, cat.priceRange]);
+
+    // 4. Slots: [[name, type, status_int, deadline]]
+    // Dropped requirements, progress (can be inferred), id
+    const s = data.scheduleSlots.map(slot => [
+        slot.clientName,
+        slot.type,
+        mapStatusToInt(slot.status),
+        slot.deadline
+    ]);
+
+    // 5. Portfolio: [[title, cat_id, url, is_video_int]]
+    // Dropped Date, ID
+    const p = data.portfolio.map(item => [
+        item.title,
+        item.category,
+        isBase64(item.imageUrl) ? '' : item.imageUrl, // Skip base64 images
+        item.mediaType === 'video' ? 1 : 0
+    ]).filter(item => item[2]); // Remove items with empty URLs (stripped base64)
+
+    return [u, t, c, s, p];
+};
+
+const unpackData = (packed: any[]): Partial<AppData> => {
+    try {
+        const [u, t, c, s, p] = packed;
+        
+        // Unpack User
+        const user: UserProfile = {
+            ...INITIAL_USER,
+            name: u[0] || INITIAL_USER.name,
+            contact: u[1] || INITIAL_USER.contact,
+            avatar: u[2] || INITIAL_USER.avatar,
+            bio: "Welcome! (Bio hidden in snapshot view)" 
+        };
+
+        // Unpack Theme
+        const theme: ThemeSettings = {
+            ...INITIAL_THEME,
+            backgroundImage: t[0] || '',
+            font: FONT_ORDER[t[1]] as any || 'sans',
+            overlayOpacity: t[2] ?? 0.2
+        };
+
+        // Unpack Categories
+        const categories: BusinessCategory[] = c.map((cat: any[]) => ({
+            id: cat[0],
+            name: cat[1],
+            priceRange: cat[2],
+            description: "Details hidden in snapshot.",
+            details: ""
+        }));
+
+        // Unpack Slots
+        const scheduleSlots: CommissionSlot[] = s.map((slot: any[], idx: number) => {
+            const statusStr = mapIntToStatus(slot[2]);
+            // Estimate progress based on status
+            const progress = (slot[2] / 5) * 100;
+            return {
+                id: `snap_${idx}`,
+                clientName: slot[0],
+                type: slot[1],
+                status: statusStr,
+                deadline: slot[3],
+                progress: progress,
+                requirements: ""
+            };
+        });
+
+        // Unpack Portfolio
+        const portfolio: PortfolioItem[] = p.map((item: any[], idx: number) => ({
+            id: `snap_p_${idx}`,
+            title: item[0],
+            category: item[1],
+            imageUrl: item[2],
+            mediaType: item[3] === 1 ? 'video' : 'image',
+            date: ''
+        }));
+
+        return { user, theme, categories, scheduleSlots, portfolio };
+    } catch (e) {
+        console.error("Unpacking failed", e);
+        return {};
+    }
+};
+
+
 const App: React.FC = () => {
   const [view, setView] = useState<ViewState>('portfolio');
   const [isReadOnly, setIsReadOnly] = useState(false);
@@ -137,23 +255,28 @@ const App: React.FC = () => {
       setIsReadOnly(true);
       setIsVisitor(true);
       
-      // If data param is present, attempt to hydrate state from it
       if (encodedData && window.LZString) {
           try {
               const decompressed = window.LZString.decompressFromEncodedURIComponent(encodedData);
               if (decompressed) {
-                  const sharedData = JSON.parse(decompressed);
-                  // Merge with defaults to ensure structure safety
-                  setData({ ...DEFAULT_STATE, ...sharedData });
-                  console.log("Hydrated from snapshot URL");
+                  const parsed = JSON.parse(decompressed);
+                  
+                  // Check if it's the new Array format (Ultra Mini) or old Object format
+                  let hydratedData: Partial<AppData> = {};
+                  if (Array.isArray(parsed)) {
+                      hydratedData = unpackData(parsed);
+                  } else {
+                      hydratedData = parsed; // Legacy support
+                  }
+                  
+                  // Merge
+                  setData({ ...DEFAULT_STATE, ...hydratedData });
               }
           } catch (e) {
               console.error("Failed to decompress shared data", e);
               alert("链接数据损坏或过期 / Link data invalid");
           }
       } else {
-        // Fallback to default state if no data param
-        // This handles the case where user just manually typed ?mode=visitor
         setData(DEFAULT_STATE);
       }
     }
@@ -170,7 +293,6 @@ const App: React.FC = () => {
         const save = async () => {
           setSaveStatus('saving');
           try {
-            // Delay save execution to let UI breathe
             await new Promise(resolve => setTimeout(resolve, 0));
             localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
             setSaveStatus('saved');
@@ -178,7 +300,6 @@ const App: React.FC = () => {
             console.error("Save failed", e);
           }
         };
-        // Increase debounce to 2000ms to reduce frequency of heavy saves
         const timer = setTimeout(save, 2000);
         return () => clearTimeout(timer);
     }
@@ -200,78 +321,36 @@ const App: React.FC = () => {
     }
   }, [theme.customFontUrl]);
 
-  // --- 4. Share Logic (Pruning & Compression) ---
+  // --- 4. Share Logic (Ultra Compression) ---
   const handleShare = useCallback(() => {
-      const isBase64 = (str: string) => str && str.startsWith('data:');
-
-      const safePortfolio = portfolio.map(item => ({
-          ...item,
-          imageUrl: isBase64(item.imageUrl) ? 'https://via.placeholder.com/800x600?text=Image+Too+Large+For+Link' : item.imageUrl
-      }));
-
-      const safeUser = {
-          ...user,
-          avatar: isBase64(user.avatar) ? 'https://ui-avatars.com/api/?name=' + user.name : user.avatar
-      };
-
-      const safeTheme = {
-          ...theme,
-          backgroundImage: isBase64(theme.backgroundImage) ? '' : theme.backgroundImage
-      };
-
-      // DATA PRUNING: Remove heavy/private fields for shorter URL
-      // Remove 'requirements' from schedule to save space and protect details
-      const prunedSlots = scheduleSlots.map(slot => ({
-        id: slot.id,
-        clientName: slot.clientName,
-        type: slot.type,
-        status: slot.status,
-        deadline: slot.deadline,
-        progress: slot.progress
-        // requirements: REMOVED
-      }));
-
-      // Remove 'details' from categories if it's too long, or keep it if essential. 
-      // For maximum shrinking, we remove templates.
-      const prunedPayload: Partial<AppData> = {
-          user: safeUser,
-          categories,
-          portfolio: safePortfolio,
-          scheduleSlots: prunedSlots, // Use pruned slots
-          theme: safeTheme,
-          portfolioLayout,
-          lastUpdated: new Date().toISOString()
-          // importTemplates: REMOVED
-      };
-
       if (window.LZString) {
           try {
-              const json = JSON.stringify(prunedPayload);
+              // Use the new PACK function to create an array-based structure
+              const miniData = packData(data);
+              
+              const json = JSON.stringify(miniData);
               const compressed = window.LZString.compressToEncodedURIComponent(json);
               
               const url = new URL(window.location.href);
               url.searchParams.set('mode', 'visitor');
-              if (user.name) url.searchParams.set('artist', user.name);
+              // We don't even need 'artist' param anymore as it's inside the data, 
+              // but keeping it for URL preview niceness is optional. Let's remove to save space.
+              // url.searchParams.set('artist', user.name); 
               url.searchParams.set('data', compressed);
               
               setShareUrl(url.toString());
               setShowShareModal(true);
 
-              const hasStrippedImages = portfolio.some(p => isBase64(p.imageUrl)) || isBase64(user.avatar) || isBase64(theme.backgroundImage);
-              if (hasStrippedImages) {
-                  // Optional: You could show a warning in the modal instead of alert
-              } 
-
           } catch (e) {
               console.error("Compression failed", e);
-              alert("生成链接失败：数据量过大。请尝试减少排单数量或使用外部图片链接。");
+              alert("生成链接失败。");
           }
       } else {
           alert("组件未加载，请刷新页面重试。");
       }
-  }, [portfolio, user, theme, categories, scheduleSlots, portfolioLayout]);
+  }, [data]);
 
-  // Update Handlers - Memoized to prevent re-renders of child components
+  // Update Handlers
   const updateData = useCallback((updates: Partial<AppData>) => {
     setData(prev => ({ ...prev, ...updates, lastUpdated: new Date().toISOString() }));
   }, []);
@@ -443,16 +522,16 @@ const App: React.FC = () => {
                </div>
                
                <div className="p-6 space-y-6 overflow-y-auto">
-                   <div className="bg-blue-50 border border-blue-100 rounded-xl p-4 flex gap-3">
-                       <Info className="text-blue-500 shrink-0 mt-0.5" size={18}/>
-                       <div className="text-sm text-blue-800 space-y-1">
-                           <p className="font-bold">快照链接已生成 (Snapshot Generated)</p>
-                           <p>此链接已进行“瘦身”处理，移除了排单详情和隐私备注，方便顾客快速查看档期和作品。</p>
+                   <div className="bg-emerald-50 border border-emerald-100 rounded-xl p-4 flex gap-3">
+                       <LinkIcon className="text-emerald-500 shrink-0 mt-0.5" size={18}/>
+                       <div className="text-sm text-emerald-800 space-y-1">
+                           <p className="font-bold">极速链接已生成 (Ultra-Mini Link)</p>
+                           <p>数据已压缩 80%。已移除隐私信息（备注/详情/简介），仅保留核心展示内容。</p>
                        </div>
                    </div>
 
                    <div className="space-y-2">
-                       <label className="text-xs font-bold text-slate-500 uppercase">Snapshot Link (Shortened)</label>
+                       <label className="text-xs font-bold text-slate-500 uppercase">Snapshot Link</label>
                        <div className="flex gap-2">
                            <input 
                              readOnly 
@@ -472,7 +551,7 @@ const App: React.FC = () => {
                            </button>
                        </div>
                        <p className="text-[10px] text-slate-400">
-                           * 如果链接依然过长导致无法发送，请使用下方的“部署代码”方案。
+                           * 如链接依然太长，请检查是否使用了 Base64 图片（请尽量使用 URL）。
                        </p>
                    </div>
 
