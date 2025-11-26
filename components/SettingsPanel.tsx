@@ -1,6 +1,7 @@
+
 import React, { useState, useRef } from 'react';
 import { UserProfile, BusinessCategory, PortfolioItem, MediaType, ThemeSettings, FontStyle } from '../types';
-import { Save, Plus, Trash2, Image, Film, Sparkles, UploadCloud, Download, FileJson, Palette, Type, LayoutTemplate, Monitor, Smartphone, Minimize, Loader2 } from 'lucide-react';
+import { Save, Plus, Trash2, Image, Film, Sparkles, UploadCloud, Download, FileJson, Palette, Type, LayoutTemplate, Monitor, Smartphone, Minimize, Loader2, X } from 'lucide-react';
 
 interface SettingsPanelProps {
   user: UserProfile;
@@ -76,10 +77,12 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
   // Loading states
   const [isProcessingAvatar, setIsProcessingAvatar] = useState(false);
   const [isProcessingBg, setIsProcessingBg] = useState(false);
+  const [isProcessingPortfolio, setIsProcessingPortfolio] = useState(false);
   
   const fileInputRef = useRef<HTMLInputElement>(null);
   const importInputRef = useRef<HTMLInputElement>(null);
   const bgInputRef = useRef<HTMLInputElement>(null);
+  const portfolioFileInputRef = useRef<HTMLInputElement>(null);
   
   const [newItem, setNewItem] = useState<{title: string; category: string; url: string; type: MediaType}>({
     title: '',
@@ -119,7 +122,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
   };
 
   const submitNewItem = () => {
-    if(!newItem.title || !newItem.url) return alert("请填写标题和链接");
+    if(!newItem.title || !newItem.url) return alert("请填写标题和上传文件/链接");
     
     onAddPortfolioItem({
       id: Date.now().toString(),
@@ -131,6 +134,45 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
     });
     
     setNewItem({ ...newItem, title: '', url: '' });
+  };
+
+  const handlePortfolioFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    // Size limit check (5MB)
+    if (file.size > 5 * 1024 * 1024) {
+      alert("文件过大！为了保证网页流畅，请上传小于 5MB 的文件，或使用外部链接。\nFile too large (>5MB). Please use URL for large files.");
+      e.target.value = '';
+      return;
+    }
+
+    try {
+      setIsProcessingPortfolio(true);
+      if (file.type.startsWith('image/')) {
+         // Compress portfolio images to HD (1920px max)
+         const compressed = await compressImage(file, 1920, 0.85);
+         setNewItem({ ...newItem, url: compressed, type: 'image' });
+      } else if (file.type.startsWith('video/')) {
+         // For video, we read as DataURL but warn about storage
+         const reader = new FileReader();
+         reader.onload = (evt) => {
+            const res = evt.target?.result as string;
+            setNewItem({ ...newItem, url: res, type: 'video' });
+            setIsProcessingPortfolio(false);
+         };
+         reader.readAsDataURL(file);
+         // Don't process further here
+         return;
+      }
+    } catch (err) {
+      console.error(err);
+      alert("文件读取失败");
+    } finally {
+      if (!file.type.startsWith('video/')) {
+         setIsProcessingPortfolio(false);
+      }
+    }
   };
 
   const handleAvatarUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -539,19 +581,40 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                     <Film size={16} /> 视频(MP4)
                   </button>
                </div>
-               <input 
-                  placeholder={newItem.type === 'image' ? "图片 URL (JPG, PNG, GIF)" : "视频 URL (MP4)"}
-                  value={newItem.url}
-                  onChange={e => setNewItem({...newItem, url: e.target.value})}
-                  className="flex-1 p-4 rounded-xl border border-white/60 bg-white/50 text-sm outline-none focus:bg-white focus:ring-4 focus:ring-primary-100/50 transition-all"
-                />
+               
+               <div className="flex-1 flex gap-2">
+                  <input 
+                    placeholder={newItem.type === 'image' ? "输入图片 URL 或上传文件 ->" : "输入视频 URL (推荐) 或上传小文件 ->"}
+                    value={newItem.url}
+                    onChange={e => setNewItem({...newItem, url: e.target.value})}
+                    className="flex-1 p-4 rounded-xl border border-white/60 bg-white/50 text-sm outline-none focus:bg-white focus:ring-4 focus:ring-primary-100/50 transition-all"
+                  />
+                  <div className="relative">
+                    <button 
+                        onClick={() => !isProcessingPortfolio && portfolioFileInputRef.current?.click()}
+                        disabled={isProcessingPortfolio}
+                        className="h-full px-4 bg-white border border-white/60 rounded-xl hover:bg-slate-50 transition-colors flex items-center justify-center gap-2 text-slate-500 font-bold"
+                        title="上传文件 Upload File"
+                    >
+                        {isProcessingPortfolio ? <Loader2 size={20} className="animate-spin text-primary-500"/> : <UploadCloud size={20}/>}
+                    </button>
+                    <input 
+                        type="file"
+                        ref={portfolioFileInputRef}
+                        onChange={handlePortfolioFileUpload}
+                        accept={newItem.type === 'image' ? "image/*" : "video/*"}
+                        className="hidden"
+                    />
+                  </div>
+               </div>
             </div>
             
             <button 
               onClick={submitNewItem}
-              className="w-full py-3.5 bg-slate-800 text-white rounded-xl font-bold hover:bg-slate-700 transition-all text-sm shadow-lg hover:shadow-xl hover:-translate-y-0.5"
+              disabled={isProcessingPortfolio}
+              className="w-full py-3.5 bg-slate-800 text-white rounded-xl font-bold hover:bg-slate-700 transition-all text-sm shadow-lg hover:shadow-xl hover:-translate-y-0.5 disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              确认发布作品
+              {isProcessingPortfolio ? '正在处理文件...' : '确认发布作品'}
             </button>
           </div>
 

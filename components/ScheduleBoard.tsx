@@ -5,7 +5,7 @@ import {
   Clock, CheckCircle2, FileSpreadsheet, Palette, Layers, Film, Download, 
   Upload, X, ArrowRight, Sparkles, Trash2,
   Calendar as CalendarIcon, List as ListIcon, ChevronLeft, ChevronRight, CalendarDays, Edit3, ClipboardList, Copy, Plus, Save,
-  Image as ImageIcon, ExternalLink, TrendingUp, PieChart, Activity, Hourglass
+  Image as ImageIcon, ExternalLink, TrendingUp, PieChart, Activity, Hourglass, Trophy, BarChart3
 } from 'lucide-react';
 
 // Declaration for XLSX attached to window via CDN
@@ -91,6 +91,7 @@ export const ScheduleBoard: React.FC<ScheduleBoardProps> = ({
   // Force calendar view if read-only, otherwise default to list
   const [viewMode, setViewMode] = useState<'list' | 'calendar'>(isReadOnly ? 'calendar' : 'list');
   const [showImport, setShowImport] = useState(false);
+  const [showFinishedReport, setShowFinishedReport] = useState(false); // New: Stats Modal
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [pasteContent, setPasteContent] = useState('');
   
@@ -111,7 +112,8 @@ export const ScheduleBoard: React.FC<ScheduleBoardProps> = ({
   
   // Stats Calculation
   const totalSlots = slots.length;
-  const finishedSlots = slots.filter(s => s.status === 'finished').length;
+  const finishedSlotsList = slots.filter(s => s.status === 'finished');
+  const finishedSlots = finishedSlotsList.length;
   const pendingSlots = totalSlots - finishedSlots;
   const completionRate = totalSlots > 0 ? Math.round((finishedSlots / totalSlots) * 100) : 0;
   
@@ -512,6 +514,16 @@ export const ScheduleBoard: React.FC<ScheduleBoardProps> = ({
     }
   };
 
+  // Group finished slots by Month for the report
+  const finishedByMonth = finishedSlotsList.reduce((acc, slot) => {
+      // Handle both deadline dates and potentially updated_at if we had it, fallback to deadline
+      const d = new Date(slot.deadline);
+      const key = isNaN(d.getTime()) ? 'Unknown Date' : d.toLocaleString('default', { month: 'long', year: 'numeric' });
+      if (!acc[key]) acc[key] = [];
+      acc[key].push(slot);
+      return acc;
+  }, {} as Record<string, CommissionSlot[]>);
+
   return (
     <div className="space-y-8 animate-fade-in relative pb-12">
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
@@ -575,8 +587,12 @@ export const ScheduleBoard: React.FC<ScheduleBoardProps> = ({
              </div>
          </div>
 
-         {/* Finished */}
-         <div className="glass-card p-5 rounded-2xl flex items-center justify-between bg-gradient-to-br from-emerald-50/50 to-teal-50/50 border border-white/60 hover:-translate-y-1 transition-transform duration-300">
+         {/* Finished - Clickable for Report */}
+         <div 
+           onClick={() => !isReadOnly && setShowFinishedReport(true)}
+           className={`glass-card p-5 rounded-2xl flex items-center justify-between bg-gradient-to-br from-emerald-50/50 to-teal-50/50 border border-white/60 transition-transform duration-300 ${!isReadOnly ? 'hover:-translate-y-1 cursor-pointer hover:shadow-md' : ''}`}
+           title={!isReadOnly ? "点击查看完成统计 / Click for Report" : ""}
+         >
              <div>
                 <p className="text-[10px] md:text-xs font-bold text-slate-400 uppercase tracking-widest mb-1">已完成 Done</p>
                 <h4 className="text-2xl md:text-3xl font-bold text-slate-700">{finishedSlots}</h4>
@@ -848,6 +864,77 @@ export const ScheduleBoard: React.FC<ScheduleBoardProps> = ({
             </div>
         )}
         </>
+      )}
+
+      {/* Finished Report Modal */}
+      {showFinishedReport && (
+        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-md z-[999] flex items-center justify-center p-4">
+           <div className="bg-white/90 rounded-3xl w-full max-w-3xl max-h-[85vh] flex flex-col shadow-2xl animate-in zoom-in-95 duration-200 border border-white/50">
+               <div className="p-6 border-b border-slate-200 flex justify-between items-center bg-white/95 backdrop-blur rounded-t-3xl">
+                   <h3 className="text-xl font-bold text-slate-800 flex items-center gap-2">
+                       <Trophy className="text-amber-500"/> 已完成统计 / Completion Report
+                   </h3>
+                   <button onClick={() => setShowFinishedReport(false)} className="p-2 hover:bg-slate-100 rounded-full transition-colors"><X size={20}/></button>
+               </div>
+               
+               <div className="flex-1 overflow-y-auto p-6 space-y-8 custom-scrollbar">
+                   {/* Summary Cards */}
+                   <div className="grid grid-cols-2 gap-4">
+                       <div className="bg-emerald-50 rounded-2xl p-4 border border-emerald-100 flex items-center gap-4">
+                           <div className="p-3 bg-white rounded-full text-emerald-500 shadow-sm"><CheckCircle2 size={24}/></div>
+                           <div>
+                               <p className="text-xs font-bold text-emerald-700 uppercase tracking-widest">Total Finished</p>
+                               <p className="text-2xl font-bold text-emerald-900">{finishedSlots}</p>
+                           </div>
+                       </div>
+                       <div className="bg-blue-50 rounded-2xl p-4 border border-blue-100 flex items-center gap-4">
+                           <div className="p-3 bg-white rounded-full text-blue-500 shadow-sm"><BarChart3 size={24}/></div>
+                           <div>
+                               <p className="text-xs font-bold text-blue-700 uppercase tracking-widest">Monthly Avg</p>
+                               <p className="text-2xl font-bold text-blue-900">
+                                   {Object.keys(finishedByMonth).length > 0 ? (finishedSlots / Object.keys(finishedByMonth).length).toFixed(1) : 0}
+                               </p>
+                           </div>
+                       </div>
+                   </div>
+
+                   {/* Monthly Breakdown */}
+                   <div className="space-y-6">
+                       {Object.keys(finishedByMonth).length === 0 ? (
+                           <p className="text-center text-slate-400 py-8">暂无已完成订单 / No finished orders yet.</p>
+                       ) : (
+                           Object.entries(finishedByMonth)
+                             .sort((a,b) => new Date(b[0]).getTime() - new Date(a[0]).getTime())
+                             .map(([month, data]) => {
+                               const monthSlots = data as CommissionSlot[];
+                               return (
+                               <div key={month} className="space-y-3">
+                                   <div className="flex items-center gap-4">
+                                       <h4 className="text-lg font-bold text-slate-700">{month}</h4>
+                                       <div className="flex-1 h-px bg-slate-200"></div>
+                                       <span className="text-xs font-bold text-slate-400 bg-slate-100 px-2 py-1 rounded-full">{monthSlots.length} orders</span>
+                                   </div>
+                                   <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                       {monthSlots.map(slot => (
+                                           <div key={slot.id} className="bg-white/60 p-3 rounded-xl border border-slate-100 flex justify-between items-center">
+                                               <div>
+                                                   <p className="font-bold text-slate-700 text-sm">{slot.clientName}</p>
+                                                   <p className="text-xs text-slate-500">{slot.type}</p>
+                                               </div>
+                                               <div className="text-right">
+                                                   <p className="text-xs text-slate-400 font-mono">{slot.deadline}</p>
+                                                   <StatusBadge status={slot.status}/>
+                                               </div>
+                                           </div>
+                                       ))}
+                                   </div>
+                               </div>
+                           )})
+                       )}
+                   </div>
+               </div>
+           </div>
+        </div>
       )}
 
       {/* Import Modal */}

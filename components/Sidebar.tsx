@@ -31,9 +31,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
   ] as const;
 
   const handleShare = () => {
-    // Generate a URL with the visitor mode parameter
+    // Generate a URL with the visitor mode parameter AND the artist's name (nickname)
     const url = new URL(window.location.href);
     url.searchParams.set('mode', 'visitor');
+    if (user.name) {
+       url.searchParams.set('artist', user.name);
+    }
     const shareableLink = url.toString();
 
     navigator.clipboard.writeText(shareableLink).then(() => {
@@ -122,7 +125,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
               </button>
               {showShareTooltip && (
                 <div className="absolute -top-14 left-1/2 -translate-x-1/2 bg-slate-900 text-white text-xs py-2 px-3 rounded-lg whitespace-nowrap animate-fade-in shadow-xl z-50">
-                  顾客链接已复制<br/>Link Copied!
+                  专属链接已复制<br/>Copied!
                 </div>
               )}
             </div>
