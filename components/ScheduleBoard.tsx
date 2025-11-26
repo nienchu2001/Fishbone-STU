@@ -631,11 +631,30 @@ export const ScheduleBoard: React.FC<ScheduleBoardProps> = ({
                       ${slot.status === 'finished' ? 'bg-gradient-to-br from-emerald-400 to-emerald-500' : 'bg-gradient-to-br from-slate-700 to-slate-800'}`}>
                       {slot.clientName.charAt(0).toUpperCase()}
                     </div>
-                    <div>
-                      <h4 className="font-bold text-slate-800">{slot.clientName}</h4>
-                      <p className="text-xs text-slate-500 font-medium bg-white/50 px-2 py-0.5 rounded inline-block mt-1">
-                        {slot.type}
-                      </p>
+                    <div className="flex-1 min-w-0">
+                      {!isReadOnly && onUpdateSlot ? (
+                        <input 
+                          value={slot.clientName}
+                          onChange={(e) => onUpdateSlot(slot.id, { clientName: e.target.value })}
+                          className="font-bold text-slate-800 bg-transparent border-b border-transparent hover:border-slate-300 focus:border-primary-300 focus:outline-none w-full truncate transition-colors mb-1"
+                          placeholder="客户/项目名称"
+                        />
+                      ) : (
+                        <h4 className="font-bold text-slate-800 truncate" title={slot.clientName}>{slot.clientName}</h4>
+                      )}
+                      
+                      {!isReadOnly && onUpdateSlot ? (
+                        <input 
+                          value={slot.type}
+                          onChange={(e) => onUpdateSlot(slot.id, { type: e.target.value })}
+                          className="text-xs text-slate-500 font-medium bg-white/50 hover:bg-white px-2 py-0.5 rounded inline-block border border-transparent hover:border-slate-300 focus:border-primary-300 focus:outline-none transition-colors w-full max-w-[150px]"
+                          placeholder="业务类型"
+                        />
+                      ) : (
+                        <p className="text-xs text-slate-500 font-medium bg-white/50 px-2 py-0.5 rounded inline-block mt-1">
+                          {slot.type}
+                        </p>
+                      )}
                     </div>
                   </div>
 
