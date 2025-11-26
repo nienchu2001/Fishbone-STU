@@ -6,7 +6,7 @@ import { ScheduleBoard } from './components/ScheduleBoard';
 import { SettingsPanel } from './components/SettingsPanel';
 import { ServicesList } from './components/ServicesList';
 import { ViewState, UserProfile, BusinessCategory, PortfolioItem, CommissionSlot, CommissionStatus, AppData, ImportTemplate, ThemeSettings, PortfolioLayoutMode } from './types';
-import { X, Copy, Check, FileCode, Zap, Info, Link as LinkIcon, Scissors } from 'lucide-react';
+import { X, Copy, Check, FileCode, Zap, Info, Link as LinkIcon, Scissors, Loader2, Globe } from 'lucide-react';
 
 const STORAGE_KEY = 'artflow_data_v1';
 
@@ -227,7 +227,6 @@ const unpackData = (packed: any[]): Partial<AppData> => {
         // Unpack Theme
         // Fallback Gradient Generation if BG is missing (because it was stripped)
         const fallbackBg = !t[0] ? `https://ui-avatars.com/api/?name=${encodeURIComponent(user.name)}&background=random&size=1920` : ''; 
-        // Note: Actually for BG we might just want CSS gradient in main app, but for now let's leave empty and let CSS handle default.
         
         const theme: ThemeSettings = {
             ...INITIAL_THEME,
@@ -292,6 +291,10 @@ const App: React.FC = () => {
   const [shareUrl, setShareUrl] = useState('');
   const [linkCopied, setLinkCopied] = useState(false);
   const [urlLength, setUrlLength] = useState(0);
+  
+  // NEW: Short Link State
+  const [isShortening, setIsShortening] = useState(false);
+  const [shortLinkError, setShortLinkError] = useState(false);
 
   // Destructure
   const { user, categories, portfolio, scheduleSlots, importTemplates, theme, portfolioLayout } = data;
@@ -390,6 +393,7 @@ const App: React.FC = () => {
               setShareUrl(finalUrl);
               setUrlLength(finalUrl.length);
               setShowShareModal(true);
+              setShortLinkError(false);
 
           } catch (e) {
               console.error("Compression failed", e);
@@ -399,6 +403,32 @@ const App: React.FC = () => {
           alert("组件未加载，请刷新页面重试。");
       }
   }, [data]);
+
+  const generateShortLink = async () => {
+      setIsShortening(true);
+      setShortLinkError(false);
+      try {
+          // Using TinyURL's public API to create a short link
+          // Note: In some strict browser environments, this might face CORS issues.
+          // We use a simple fetch here.
+          const response = await fetch(`https://tinyurl.com/api-create.php?url=${encodeURIComponent(shareUrl)}`);
+          if (response.ok) {
+              const shortUrl = await response.text();
+              setShareUrl(shortUrl);
+              setUrlLength(shortUrl.length);
+              navigator.clipboard.writeText(shortUrl);
+              setLinkCopied(true);
+              setTimeout(() => setLinkCopied(false), 2000);
+          } else {
+              throw new Error("Shortening failed");
+          }
+      } catch (e) {
+          console.error(e);
+          setShortLinkError(true);
+      } finally {
+          setIsShortening(false);
+      }
+  };
 
   // Update Handlers (Wrapped in useCallback)
   const updateData = useCallback((updates: Partial<AppData>) => {
@@ -567,58 +597,87 @@ const App: React.FC = () => {
         <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-[100] flex items-center justify-center p-4 animate-in fade-in duration-200">
            <div className="bg-white rounded-2xl w-full max-w-2xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
                <div className="p-4 border-b border-slate-100 flex justify-between items-center bg-white/50 backdrop-blur">
-                   <h3 className="font-bold text-slate-800 flex items-center gap-2"><Zap size={20} className="text-amber-500"/> 分享主页 Share Profile</h3>
+                   <h3 className="font-bold text-slate-800 flex items-center gap-2"><Zap size={20} className="text-amber-500"/> 分享中心 Share Center</h3>
                    <button onClick={() => setShowShareModal(false)}><X size={20} className="text-slate-400 hover:text-slate-600"/></button>
                </div>
                
                <div className="p-6 space-y-6 overflow-y-auto">
-                   <div className="bg-emerald-50 border border-emerald-100 rounded-xl p-4 flex gap-3">
-                       <Scissors className="text-emerald-500 shrink-0 mt-0.5" size={18}/>
-                       <div className="text-sm text-emerald-800 space-y-1">
-                           <p className="font-bold">V3 极限压缩成功 (Ultra-Lite Compression)</p>
-                           <p>链接长度已优化至 {urlLength} 字符。系统自动剔除了本地大图，保留了核心数据。</p>
+                   
+                   {/* Status Banner */}
+                   <div className={`border rounded-xl p-4 flex gap-3 transition-colors ${urlLength < 100 ? 'bg-emerald-50 border-emerald-100' : 'bg-blue-50 border-blue-100'}`}>
+                       {urlLength < 100 ? <Check className="text-emerald-500 shrink-0 mt-0.5" size={18}/> : <Scissors className="text-blue-500 shrink-0 mt-0.5" size={18}/>}
+                       <div className="text-sm space-y-1">
+                           <p className={`font-bold ${urlLength < 100 ? 'text-emerald-800' : 'text-blue-800'}`}>
+                               {urlLength < 100 ? '完美！终极短链生成成功 (Perfect!)' : '标准压缩链接生成的 (Standard Compressed)'}
+                           </p>
+                           <p className={urlLength < 100 ? 'text-emerald-700' : 'text-blue-700'}>
+                               当前长度: <strong>{urlLength}</strong> 字符。
+                               {urlLength < 100 ? ' 极简链接，适合任何平台分享。' : ' 点击下方按钮可压缩至 30 字符以内。'}
+                           </p>
                        </div>
                    </div>
 
-                   <div className="space-y-2">
-                       <label className="text-xs font-bold text-slate-500 uppercase">Snapshot Link (Lite V3)</label>
-                       <div className="flex gap-2">
+                   <div className="space-y-3">
+                       <label className="text-xs font-bold text-slate-500 uppercase flex justify-between">
+                           <span>Share Link</span>
+                           {urlLength > 100 && <span className="text-amber-500">建议生成短链</span>}
+                       </label>
+                       
+                       <div className="flex flex-col md:flex-row gap-2">
                            <input 
                              readOnly 
                              value={shareUrl} 
-                             className="flex-1 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs font-mono text-slate-600 outline-none focus:ring-2 focus:ring-primary-100"
+                             className="flex-1 bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-xs font-mono text-slate-600 outline-none focus:ring-2 focus:ring-primary-100"
                            />
-                           <button 
-                             onClick={() => {
-                                 navigator.clipboard.writeText(shareUrl);
-                                 setLinkCopied(true);
-                                 setTimeout(() => setLinkCopied(false), 2000);
-                             }}
-                             className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-lg font-bold text-sm transition-colors flex items-center gap-2 shrink-0"
-                           >
-                               {linkCopied ? <Check size={16}/> : <Copy size={16}/>}
-                               {linkCopied ? 'Copied' : 'Copy'}
-                           </button>
+                           <div className="flex gap-2 shrink-0">
+                               {/* Shorten Button */}
+                               {urlLength > 100 && (
+                                   <button 
+                                     onClick={generateShortLink}
+                                     disabled={isShortening}
+                                     className="px-4 py-2 bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white rounded-xl font-bold text-sm transition-all shadow-md hover:shadow-lg flex items-center gap-2 disabled:opacity-70"
+                                   >
+                                     {isShortening ? <Loader2 size={16} className="animate-spin"/> : <Globe size={16}/>}
+                                     {isShortening ? '生成中...' : '转为短链'}
+                                   </button>
+                               )}
+
+                               <button 
+                                 onClick={() => {
+                                     navigator.clipboard.writeText(shareUrl);
+                                     setLinkCopied(true);
+                                     setTimeout(() => setLinkCopied(false), 2000);
+                                 }}
+                                 className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-xl font-bold text-sm transition-colors flex items-center gap-2 shadow-md"
+                               >
+                                   {linkCopied ? <Check size={16}/> : <Copy size={16}/>}
+                                   {linkCopied ? '已复制' : '复制'}
+                               </button>
+                           </div>
                        </div>
-                       <p className="text-[10px] text-slate-400 leading-tight">
-                           * 注意：若头像/背景图使用了本地上传(Base64)，为了链接长度已被自动剔除。顾客将看到默认美化占位符。<br/>
-                           * 想要完整图片效果？请在设置中使用 URL 图片链接，或使用下方的“部署代码”方案。
+                       
+                       {shortLinkError && (
+                           <p className="text-xs text-red-500 font-bold">
+                               生成失败 (可能是网络原因)。请尝试复制长链接，或手动使用 tinyurl.com 转换。
+                           </p>
+                       )}
+                       
+                       <p className="text-[10px] text-slate-400 leading-tight pl-1">
+                           * 长链接包含了您的所有网页数据（不含本地大图）。<br/>
+                           * “转为短链”功能将调用公共服务生成 &lt; 30 字符的永久链接。
                        </p>
                    </div>
 
                    <div className="border-t border-slate-100 pt-6">
-                       <h4 className="font-bold text-slate-700 mb-3 flex items-center gap-2"><FileCode size={18}/> 终极短链方案 (Deployment)</h4>
-                       <p className="text-sm text-slate-500 mb-4">
-                           如果你希望获得最短、永久的链接 (如 <code>mysite.vercel.app</code>)，请将你的数据生成为代码，并更新到项目中进行部署。
-                       </p>
+                       <h4 className="font-bold text-slate-700 mb-3 flex items-center gap-2"><FileCode size={18}/> 备选方案：部署代码</h4>
                        <button 
                          onClick={() => {
                              setShowShareModal(false);
                              setView('settings');
                          }}
-                         className="w-full py-3 border border-slate-300 rounded-xl font-bold text-slate-600 hover:bg-slate-50 transition-colors"
+                         className="w-full py-3 border border-slate-200 rounded-xl font-bold text-slate-500 hover:bg-slate-50 hover:text-slate-700 transition-colors text-sm"
                        >
-                           前往控制台生成部署代码 (Go to Console)
+                           如果短链服务不稳定，请使用【部署代码】方案
                        </button>
                    </div>
                </div>
