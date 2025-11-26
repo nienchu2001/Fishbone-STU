@@ -1,7 +1,8 @@
+
 export interface UserProfile {
   name: string;
   avatar: string;
-  email: string;
+  contact: string; // Changed from email to generic contact
   bio: string;
   tags: string[];
 }
@@ -17,6 +18,7 @@ export interface CommissionSlot {
   deadline: string;
   progress: number;
   price?: string;
+  requirements?: string; // New field for order details
 }
 
 export type MediaType = 'image' | 'video';
@@ -38,4 +40,38 @@ export interface BusinessCategory {
   details?: string; // Extended details for the expandable view
 }
 
+export interface ImportTemplate {
+  id: string;
+  name: string;
+  content: string;
+}
+
 export type ViewState = 'portfolio' | 'schedule' | 'settings' | 'services';
+
+export interface ReadOnlyProps {
+  isReadOnly?: boolean;
+}
+
+export type FontStyle = 'sans' | 'serif' | 'artistic' | 'handwriting';
+export type PortfolioLayoutMode = 'masonry' | 'grid' | 'list';
+export type BackgroundSizeMode = 'cover' | 'contain' | 'auto';
+
+export interface ThemeSettings {
+  backgroundImage: string;
+  backgroundSize: BackgroundSizeMode; // New field for background sizing
+  font: FontStyle; // Kept for backward compatibility or preset fallback
+  customFontUrl?: string; // New field for custom font URL
+  overlayOpacity: number; // 0 to 1
+}
+
+// Global Data Structure for Export/Import
+export interface AppData {
+  user: UserProfile;
+  categories: BusinessCategory[];
+  portfolio: PortfolioItem[];
+  scheduleSlots: CommissionSlot[];
+  importTemplates: ImportTemplate[];
+  theme: ThemeSettings;
+  portfolioLayout: PortfolioLayoutMode; // Persist layout choice
+  lastUpdated: string;
+}
