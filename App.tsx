@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Sidebar } from './components/Sidebar';
 import { PortfolioGrid } from './components/PortfolioGrid';
 import { ScheduleBoard } from './components/ScheduleBoard';
@@ -72,25 +72,12 @@ const INITIAL_TEMPLATES: ImportTemplate[] = [
     content: `昵称：老板A
 业务：UI定制
 日期：2024-05-01
-备注：这里写详细要求...
-(支持换行)
-
-昵称：老板B
-业务：徽章
-日期：2024-05-05`
-  },
-  {
-    id: 'simple',
-    name: '简易单行格式',
-    content: `Name: Client1
-Type: Logo
-DDL: 2024-12-01
-Note: Simple style`
+备注：这里写详细要求...`
   }
 ];
 
 const INITIAL_THEME: ThemeSettings = {
-  backgroundImage: '', // Default to CSS gradient
+  backgroundImage: '', 
   backgroundSize: 'cover',
   font: 'sans',
   customFontUrl: '',
@@ -99,30 +86,8 @@ const INITIAL_THEME: ThemeSettings = {
 
 const STATUS_ORDER: CommissionStatus[] = ['waiting', 'typography', 'motion', 'color_fx', 'export', 'finished'];
 
-// Robust Data Loading
-const loadInitialState = (): AppData => {
-  try {
-    const saved = localStorage.getItem(STORAGE_KEY);
-    if (saved) {
-      const parsed = JSON.parse(saved);
-      // Data Merging Strategy:
-      // If saved data exists, we prefer it.
-      // However, if the schema updated (new fields added), we use defaults for missing fields to prevent crashes.
-      return {
-        user: { ...INITIAL_USER, ...parsed.user },
-        categories: Array.isArray(parsed.categories) ? parsed.categories : INITIAL_CATEGORIES,
-        portfolio: Array.isArray(parsed.portfolio) ? parsed.portfolio : INITIAL_PORTFOLIO,
-        scheduleSlots: Array.isArray(parsed.scheduleSlots) ? parsed.scheduleSlots : INITIAL_SLOTS,
-        importTemplates: Array.isArray(parsed.importTemplates) ? parsed.importTemplates : INITIAL_TEMPLATES,
-        theme: { ...INITIAL_THEME, ...parsed.theme },
-        portfolioLayout: parsed.portfolioLayout || 'masonry',
-        lastUpdated: parsed.lastUpdated || new Date().toISOString()
-      };
-    }
-  } catch (e) {
-    console.warn("Could not load local storage data, reverting to defaults.", e);
-  }
-  return {
+// Default Empty State
+const DEFAULT_STATE: AppData = {
     user: INITIAL_USER,
     categories: INITIAL_CATEGORIES,
     portfolio: INITIAL_PORTFOLIO,
@@ -131,136 +96,191 @@ const loadInitialState = (): AppData => {
     theme: INITIAL_THEME,
     portfolioLayout: 'masonry',
     lastUpdated: new Date().toISOString()
-  };
+};
+
+const loadInitialState = (): AppData => {
+  try {
+    const saved = localStorage.getItem(STORAGE_KEY);
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      return { ...DEFAULT_STATE, ...parsed };
+    }
+  } catch (e) {
+    console.warn("Could not load local storage data.", e);
+  }
+  return DEFAULT_STATE;
 };
 
 const App: React.FC = () => {
   const [view, setView] = useState<ViewState>('portfolio');
   const [isReadOnly, setIsReadOnly] = useState(false);
-  const [isVisitor, setIsVisitor] = useState(false); // True if via ?mode=visitor
+  const [isVisitor, setIsVisitor] = useState(false);
   const [saveStatus, setSaveStatus] = useState<'saved' | 'saving'>('saved');
-  
-  // Initialize State
   const [data, setData] = useState<AppData>(loadInitialState);
 
-  // Destructure for easier access
+  // Destructure
   const { user, categories, portfolio, scheduleSlots, importTemplates, theme, portfolioLayout } = data;
 
-  // Persistence Effect with Auto-Save Indicator
+  // --- 1. Hydrate from URL Param (Snapshot Sharing) ---
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const mode = params.get('mode');
+    const encodedData = params.get('data');
+
+    if (mode === 'visitor') {
+      setIsReadOnly(true);
+      setIsVisitor(true);
+      
+      // If data param is present, attempt to hydrate state from it
+      if (encodedData && window.LZString) {
+          try {
+              const decompressed = window.LZString.decompressFromEncodedURIComponent(encodedData);
+              if (decompressed) {
+                  const sharedData = JSON.parse(decompressed);
+                  // Merge with defaults to ensure structure safety
+                  setData({ ...DEFAULT_STATE, ...sharedData });
+                  console.log("Hydrated from snapshot URL");
+              }
+          } catch (e) {
+              console.error("Failed to decompress shared data", e);
+              alert("链接数据损坏或过期 / Link data invalid");
+          }
+      } else {
+        // Fallback to default state if no data param
+        // This handles the case where user just manually typed ?mode=visitor
+        setData(DEFAULT_STATE);
+      }
+    }
+  }, []);
+
+  // --- 2. Auto-Save Logic (Optimized) ---
   const isFirstRender = useRef(true);
   useEffect(() => {
     if (isFirstRender.current) {
       isFirstRender.current = false;
       return;
     }
+    if (!isVisitor) {
+        const save = async () => {
+          setSaveStatus('saving');
+          try {
+            // Delay save execution to let UI breathe
+            await new Promise(resolve => setTimeout(resolve, 0));
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+            setSaveStatus('saved');
+          } catch (e) {
+            console.error("Save failed", e);
+          }
+        };
+        // Increase debounce to 2000ms to reduce frequency of heavy saves
+        const timer = setTimeout(save, 2000);
+        return () => clearTimeout(timer);
+    }
+  }, [data, isVisitor]);
 
-    const save = async () => {
-      setSaveStatus('saving');
-      try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
-        // Add a small delay to show "saving" state for UX
-        setTimeout(() => setSaveStatus('saved'), 600);
-      } catch (e) {
-        console.error("Save failed", e);
-      }
-    };
-    
-    // Debounce save slightly to prevent thrashing on text inputs
-    const timer = setTimeout(save, 500);
-    return () => clearTimeout(timer);
-  }, [data]);
-
-  // Dynamic Font Injection Effect
+  // --- 3. Dynamic Font Injection ---
   useEffect(() => {
     const styleId = 'custom-font-style';
     let styleTag = document.getElementById(styleId);
-    
     if (theme.customFontUrl) {
         if (!styleTag) {
             styleTag = document.createElement('style');
             styleTag.id = styleId;
             document.head.appendChild(styleTag);
         }
-        styleTag.innerHTML = `
-            @font-face {
-                font-family: 'CustomUserFont';
-                src: url('${theme.customFontUrl}');
-                font-display: swap;
-            }
-        `;
+        styleTag.innerHTML = `@font-face { font-family: 'CustomUserFont'; src: url('${theme.customFontUrl}'); font-display: swap; }`;
     } else {
         if (styleTag) styleTag.remove();
     }
   }, [theme.customFontUrl]);
 
-  // Check URL param for visitor mode
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    if (params.get('mode') === 'visitor') {
-      setIsReadOnly(true);
-      setIsVisitor(true);
-    }
+  // --- 4. Share Logic ---
+  const handleShare = useCallback(() => {
+      const isBase64 = (str: string) => str && str.startsWith('data:');
+
+      const safePortfolio = portfolio.map(item => ({
+          ...item,
+          imageUrl: isBase64(item.imageUrl) ? 'https://via.placeholder.com/800x600?text=Image+Too+Large+For+Link' : item.imageUrl
+      }));
+
+      const safeUser = {
+          ...user,
+          avatar: isBase64(user.avatar) ? 'https://ui-avatars.com/api/?name=' + user.name : user.avatar
+      };
+
+      const safeTheme = {
+          ...theme,
+          backgroundImage: isBase64(theme.backgroundImage) ? '' : theme.backgroundImage
+      };
+
+      const payload: Partial<AppData> = {
+          user: safeUser,
+          categories,
+          portfolio: safePortfolio,
+          scheduleSlots,
+          theme: safeTheme,
+          portfolioLayout,
+          lastUpdated: new Date().toISOString()
+      };
+
+      if (window.LZString) {
+          try {
+              const json = JSON.stringify(payload);
+              const compressed = window.LZString.compressToEncodedURIComponent(json);
+              
+              const url = new URL(window.location.href);
+              url.searchParams.set('mode', 'visitor');
+              if (user.name) url.searchParams.set('artist', user.name);
+              url.searchParams.set('data', compressed);
+              
+              const shareLink = url.toString();
+              
+              navigator.clipboard.writeText(shareLink).then(() => {
+                  const hasStrippedImages = portfolio.some(p => isBase64(p.imageUrl)) || isBase64(user.avatar) || isBase64(theme.backgroundImage);
+                  if (hasStrippedImages) {
+                      alert("专属快照链接已生成！\n\n注意：您使用了本地上传的图片(Base64)，由于链接长度限制，这些图片在分享链接中无法显示。\n建议使用「图片URL」来获得最佳的分享体验。");
+                  } 
+              });
+
+          } catch (e) {
+              console.error("Compression failed", e);
+              alert("生成链接失败：数据量过大。请尝试减少排单数量或使用外部图片链接。");
+          }
+      } else {
+          alert("组件未加载，请刷新页面重试。");
+      }
+  }, [portfolio, user, theme, categories, scheduleSlots, portfolioLayout]);
+
+  // Update Handlers - Memoized to prevent re-renders of child components
+  const updateData = useCallback((updates: Partial<AppData>) => {
+    setData(prev => ({ ...prev, ...updates, lastUpdated: new Date().toISOString() }));
   }, []);
 
-  // --- Handlers ---
-
-  const updateData = (updates: Partial<AppData>) => {
-    setData(prev => ({ ...prev, ...updates, lastUpdated: new Date().toISOString() }));
-  };
-
-  const handleUpdateUser = (updatedUser: UserProfile) => updateData({ user: updatedUser });
-  const handleUpdateCategories = (updatedCategories: BusinessCategory[]) => updateData({ categories: updatedCategories });
-  const handleUpdateTheme = (updatedTheme: ThemeSettings) => updateData({ theme: updatedTheme });
-  const handleUpdateLayout = (layout: PortfolioLayoutMode) => updateData({ portfolioLayout: layout });
-  
-  const handleAddPortfolioItem = (item: PortfolioItem) => {
-    updateData({ portfolio: [item, ...portfolio] });
-  };
-
-  const handleDeletePortfolioItem = (id: string) => {
-    updateData({ portfolio: portfolio.filter(item => item.id !== id) });
-  };
-
-  const handleImportSchedule = (newSlots: CommissionSlot[]) => {
-    updateData({ scheduleSlots: [...scheduleSlots, ...newSlots] });
-  };
-
-  const handleUpdateSlot = (id: string, updates: Partial<CommissionSlot>) => {
-    updateData({
-      scheduleSlots: scheduleSlots.map(slot => 
-        slot.id === id ? { ...slot, ...updates } : slot
-      )
-    });
-  };
-
-  const handleDeleteSlot = (id: string) => {
-    updateData({ scheduleSlots: scheduleSlots.filter(slot => slot.id !== id) });
-  };
-
-  const handleAdvanceStatus = (id: string) => {
-    updateData({
-      scheduleSlots: scheduleSlots.map(slot => {
+  const handleUpdateUser = useCallback((u: UserProfile) => updateData({ user: u }), [updateData]);
+  const handleUpdateCategories = useCallback((c: BusinessCategory[]) => updateData({ categories: c }), [updateData]);
+  const handleUpdateTheme = useCallback((t: ThemeSettings) => updateData({ theme: t }), [updateData]);
+  const handleUpdateLayout = useCallback((l: PortfolioLayoutMode) => updateData({ portfolioLayout: l }), [updateData]);
+  const handleAddPortfolioItem = useCallback((i: PortfolioItem) => updateData({ portfolio: [i, ...portfolio] }), [updateData, portfolio]); // Note: portfolio dependency needed here unless we use functional update inside specific handler
+  const handleDeletePortfolioItem = useCallback((id: string) => updateData({ portfolio: portfolio.filter(i => i.id !== id) }), [updateData, portfolio]);
+  const handleImportSchedule = useCallback((s: CommissionSlot[]) => updateData({ scheduleSlots: [...scheduleSlots, ...s] }), [updateData, scheduleSlots]);
+  const handleUpdateSlot = useCallback((id: string, u: Partial<CommissionSlot>) => updateData({ scheduleSlots: scheduleSlots.map(s => s.id === id ? { ...s, ...u } : s) }), [updateData, scheduleSlots]);
+  const handleDeleteSlot = useCallback((id: string) => updateData({ scheduleSlots: scheduleSlots.filter(s => s.id !== id) }), [updateData, scheduleSlots]);
+  const handleAdvanceStatus = useCallback((id: string) => updateData({
+    scheduleSlots: scheduleSlots.map(slot => {
         if (slot.id !== id) return slot;
-        const currentIndex = STATUS_ORDER.indexOf(slot.status);
-        if (currentIndex < STATUS_ORDER.length - 1) {
-          const nextStatus = STATUS_ORDER[currentIndex + 1];
-          const newProgress = Math.round(((currentIndex + 1) / (STATUS_ORDER.length - 1)) * 100);
-          return { ...slot, status: nextStatus, progress: newProgress };
+        const idx = STATUS_ORDER.indexOf(slot.status);
+        if (idx < STATUS_ORDER.length - 1) {
+          const next = STATUS_ORDER[idx + 1];
+          const prog = Math.round(((idx + 1) / (STATUS_ORDER.length - 1)) * 100);
+          return { ...slot, status: next, progress: prog };
         }
         return slot;
-      })
-    });
-  };
+    })
+  }), [updateData, scheduleSlots]);
+  const handleUpdateTemplates = useCallback((t: ImportTemplate[]) => updateData({ importTemplates: t }), [updateData]);
 
-  const handleUpdateTemplates = (templates: ImportTemplate[]) => {
-    updateData({ importTemplates: templates });
-  };
-
-  // --- Global Export / Import ---
-
-  const handleExportData = () => {
-    const dataStr = JSON.stringify(data, null, 2);
-    const blob = new Blob([dataStr], { type: "application/json" });
+  const handleExportData = useCallback(() => {
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
@@ -268,52 +288,31 @@ const App: React.FC = () => {
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
-  };
+  }, [data]);
 
-  const handleImportData = (file: File) => {
+  const handleImportData = useCallback((file: File) => {
     const reader = new FileReader();
     reader.onload = (e) => {
       try {
-        const json = e.target?.result as string;
-        const parsed = JSON.parse(json);
-        if (parsed.user && Array.isArray(parsed.portfolio)) {
-          // Robust merge during import as well
-          const safeData: AppData = {
-              user: { ...INITIAL_USER, ...parsed.user },
-              categories: parsed.categories || INITIAL_CATEGORIES,
-              portfolio: parsed.portfolio || INITIAL_PORTFOLIO,
-              scheduleSlots: parsed.scheduleSlots || INITIAL_SLOTS,
-              importTemplates: parsed.importTemplates || INITIAL_TEMPLATES,
-              theme: { ...INITIAL_THEME, ...parsed.theme },
-              portfolioLayout: parsed.portfolioLayout || 'masonry',
-              lastUpdated: new Date().toISOString()
-          };
-          setData(safeData);
-          alert("数据导入成功！Backup restored successfully.");
-        } else {
-          alert("无效的备份文件 Invalid backup file.");
+        const parsed = JSON.parse(e.target?.result as string);
+        if (parsed.user) {
+          setData({ ...DEFAULT_STATE, ...parsed });
+          alert("数据导入成功！Backup restored.");
         }
-      } catch (err) {
-        alert("文件解析错误 Failed to parse file.");
-      }
+      } catch (err) { alert("文件错误 File Error"); }
     };
     reader.readAsText(file);
-  };
+  }, []);
 
-  const handleToggleReadOnly = () => {
-    // If in strict visitor mode, user cannot toggle read-only off.
-    if (isVisitor) return;
-    
-    setIsReadOnly(!isReadOnly);
+  const handleToggleReadOnly = useCallback(() => {
+    if (isVisitor) return; 
+    setIsReadOnly(prev => !prev);
     if (!isReadOnly) setView('portfolio');
-  };
+  }, [isVisitor, isReadOnly]);
 
-  // Dynamic Theme Styles Logic
   const getFontFamily = () => {
       if (theme.customFontUrl) return 'CustomUserFont, sans-serif';
-      
       switch (theme.font) {
-          case 'sans': return '"Noto Sans SC", sans-serif';
           case 'serif': return '"Noto Serif SC", serif';
           case 'artistic': return '"ZCOOL XiaoWei", serif';
           case 'handwriting': return '"Long Cang", cursive';
@@ -332,7 +331,7 @@ const App: React.FC = () => {
   return (
     <div className="min-h-screen text-slate-800 flex transition-all duration-500" 
          style={{ ...backgroundStyle, fontFamily: getFontFamily() }}>
-      {/* Background Overlay */}
+      
       {theme.backgroundImage && (
         <div className="fixed inset-0 pointer-events-none z-0" style={{ backgroundColor: `rgba(255,255,255,${theme.overlayOpacity})` }}></div>
       )}
@@ -346,11 +345,12 @@ const App: React.FC = () => {
           isVisitor={isVisitor}
           saveStatus={saveStatus}
           onToggleReadOnly={handleToggleReadOnly}
+          onShare={handleShare}
         />
         
         <main className="flex-1 ml-20 lg:ml-64 p-6 lg:p-12 transition-all duration-300">
           <div className="max-w-7xl mx-auto">
-            {/* Header Mobile Only */}
+            {/* Mobile Header */}
             <div className="lg:hidden flex items-center gap-4 mb-8">
                <div className="w-10 h-10 rounded-full overflow-hidden border-2 border-white shadow-md">
                   <img src={user.avatar} className="w-full h-full object-cover"/>
@@ -393,6 +393,8 @@ const App: React.FC = () => {
                   categories={categories}
                   portfolio={portfolio}
                   theme={theme}
+                  scheduleSlots={scheduleSlots}
+                  templates={importTemplates}
                   onUpdateUser={handleUpdateUser}
                   onUpdateCategories={handleUpdateCategories}
                   onUpdateTheme={handleUpdateTheme}

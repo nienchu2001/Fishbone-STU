@@ -8,7 +8,7 @@ interface ServicesListProps {
   user: UserProfile;
 }
 
-export const ServicesList: React.FC<ServicesListProps> = ({ categories, user }) => {
+export const ServicesList = React.memo<ServicesListProps>(({ categories, user }) => {
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [showContactModal, setShowContactModal] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -71,7 +71,6 @@ export const ServicesList: React.FC<ServicesListProps> = ({ categories, user }) 
                 </div>
               </div>
 
-              {/* Expanded Details Section */}
               <div 
                 className={`bg-white/40 backdrop-blur-md border-t border-white/50 transition-all duration-500 ease-in-out
                   ${isExpanded ? 'max-h-[500px] opacity-100' : 'max-h-0 opacity-0'}`}
@@ -93,7 +92,6 @@ export const ServicesList: React.FC<ServicesListProps> = ({ categories, user }) 
         })}
       </div>
 
-      {/* Contact Modal */}
       {showContactModal && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/20 backdrop-blur-sm animate-in fade-in duration-200">
           <div className="bg-white/90 rounded-3xl shadow-2xl w-full max-w-sm border border-white/60 p-6 relative animate-in zoom-in-95 duration-200">
@@ -141,4 +139,4 @@ export const ServicesList: React.FC<ServicesListProps> = ({ categories, user }) 
       )}
     </div>
   );
-};
+});

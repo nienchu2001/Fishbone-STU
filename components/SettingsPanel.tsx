@@ -1,13 +1,15 @@
 
-import React, { useState, useRef } from 'react';
-import { UserProfile, BusinessCategory, PortfolioItem, MediaType, ThemeSettings, FontStyle } from '../types';
-import { Save, Plus, Trash2, Image, Film, Sparkles, UploadCloud, Download, FileJson, Palette, Type, LayoutTemplate, Monitor, Smartphone, Minimize, Loader2, X } from 'lucide-react';
+import React, { useState, useRef, useEffect } from 'react';
+import { UserProfile, BusinessCategory, PortfolioItem, MediaType, ThemeSettings, FontStyle, CommissionSlot, ImportTemplate } from '../types';
+import { Save, Plus, Trash2, Image, Film, Sparkles, UploadCloud, Download, FileJson, Palette, Type, LayoutTemplate, Monitor, Smartphone, Minimize, Loader2, X, Code, Copy, Info, Wrench, ExternalLink, FileCode, Scissors } from 'lucide-react';
 
 interface SettingsPanelProps {
   user: UserProfile;
   categories: BusinessCategory[];
   portfolio: PortfolioItem[];
   theme: ThemeSettings;
+  scheduleSlots?: CommissionSlot[];
+  templates?: ImportTemplate[];
   onUpdateUser: (user: UserProfile) => void;
   onUpdateCategories: (categories: BusinessCategory[]) => void;
   onUpdateTheme: (theme: ThemeSettings) => void;
@@ -16,6 +18,47 @@ interface SettingsPanelProps {
   onExportData: () => void;
   onImportData: (file: File) => void;
 }
+
+// Optimized Buffered Input Component
+// This maintains its own local state and only triggers updates on blur
+const BufferedInput = React.memo(({ value, onCommit, className, placeholder, ...props }: any) => {
+  const [localValue, setLocalValue] = useState(value);
+  
+  // Sync if external value changes significantly (unlikely during typing due to memo, but safe to have)
+  useEffect(() => {
+    setLocalValue(value);
+  }, [value]);
+
+  return (
+    <input 
+      className={className}
+      placeholder={placeholder}
+      value={localValue}
+      onChange={e => setLocalValue(e.target.value)}
+      onBlur={() => onCommit(localValue)}
+      {...props}
+    />
+  );
+});
+
+const BufferedTextArea = React.memo(({ value, onCommit, className, placeholder, ...props }: any) => {
+  const [localValue, setLocalValue] = useState(value);
+  
+  useEffect(() => {
+    setLocalValue(value);
+  }, [value]);
+
+  return (
+    <textarea 
+      className={className}
+      placeholder={placeholder}
+      value={localValue}
+      onChange={e => setLocalValue(e.target.value)}
+      onBlur={() => onCommit(localValue)}
+      {...props}
+    />
+  );
+});
 
 // Utility to compress images to avoid freezing localStorage
 const compressImage = (file: File, maxWidth: number, quality: number = 0.7): Promise<string> => {
@@ -30,7 +73,6 @@ const compressImage = (file: File, maxWidth: number, quality: number = 0.7): Pro
         let width = img.width;
         let height = img.height;
 
-        // Calculate new dimensions
         if (width > maxWidth) {
           height = (height * maxWidth) / width;
           width = maxWidth;
@@ -41,654 +83,741 @@ const compressImage = (file: File, maxWidth: number, quality: number = 0.7): Pro
         const ctx = canvas.getContext('2d');
         if (ctx) {
             ctx.drawImage(img, 0, 0, width, height);
-            // Use JPEG for background/large photos to save space (unless it needs transparency)
-            // If original is PNG, we might want to keep transparency for avatars, but for backgrounds JPEG is safer for size.
-            // Here we prioritize size/performance.
             const outputType = file.type === 'image/png' && maxWidth < 500 ? 'image/png' : 'image/jpeg';
             resolve(canvas.toDataURL(outputType, quality));
         } else {
             reject(new Error("Canvas context failed"));
         }
       };
-      img.onerror = (err) => reject(err);
+      img.onerror = reject;
     };
-    reader.onerror = (err) => reject(err);
+    reader.onerror = reject;
   });
 };
 
 export const SettingsPanel: React.FC<SettingsPanelProps> = ({ 
   user, 
   categories, 
-  portfolio,
-  theme,
+  portfolio, 
+  theme, 
+  scheduleSlots,
+  templates,
   onUpdateUser, 
-  onUpdateCategories,
-  onUpdateTheme,
-  onAddPortfolioItem,
+  onUpdateCategories, 
+  onUpdateTheme, 
+  onAddPortfolioItem, 
   onDeletePortfolioItem,
   onExportData,
   onImportData
 }) => {
-  const [activeTab, setActiveTab] = useState<'profile' | 'appearance' | 'services' | 'portfolio' | 'data'>('profile');
-  const [userData, setUserData] = useState(user);
-  const [localCategories, setLocalCategories] = useState(categories);
-  const [localTheme, setLocalTheme] = useState(theme);
-  
-  // Loading states
-  const [isProcessingAvatar, setIsProcessingAvatar] = useState(false);
-  const [isProcessingBg, setIsProcessingBg] = useState(false);
-  const [isProcessingPortfolio, setIsProcessingPortfolio] = useState(false);
-  
+  const [activeTab, setActiveTab] = useState('profile');
+  const [isUploading, setIsUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const importInputRef = useRef<HTMLInputElement>(null);
-  const bgInputRef = useRef<HTMLInputElement>(null);
-  const portfolioFileInputRef = useRef<HTMLInputElement>(null);
   
-  const [newItem, setNewItem] = useState<{title: string; category: string; url: string; type: MediaType}>({
-    title: '',
-    category: categories[0]?.id || '',
-    url: '',
-    type: 'image'
-  });
+  // Deployment Code Gen State
+  const [showDeployCode, setShowDeployCode] = useState(false);
+  const [deployCode, setDeployCode] = useState('');
 
-  const handleSaveProfile = () => {
-    onUpdateUser(userData);
-    alert('个人资料已保存！\nProfile saved successfully.');
-  };
+  // Tool State
+  const [toolOutput, setToolOutput] = useState('');
+  const [isConverting, setIsConverting] = useState(false);
 
-  const handleSaveCategories = () => {
-    onUpdateCategories(localCategories);
-    alert('业务设置已保存！\nServices saved successfully.');
-  };
-
-  const handleSaveTheme = () => {
-    onUpdateTheme(localTheme);
-    alert('外观设置已保存并同步生效！\nAppearance settings saved and applied.');
-  };
-
-  const handleAddCategory = () => {
-    const newCat: BusinessCategory = {
-      id: Date.now().toString(),
-      name: '新业务',
-      priceRange: '¥??',
-      description: '简短描述',
-      details: '详细描述\n- 规格:\n- 工期:'
-    };
-    setLocalCategories([...localCategories, newCat]);
-  };
-
-  const updateCategory = (id: string, field: keyof BusinessCategory, value: string) => {
-    setLocalCategories(prev => prev.map(c => c.id === id ? { ...c, [field]: value } : c));
-  };
-
-  const submitNewItem = () => {
-    if(!newItem.title || !newItem.url) return alert("请填写标题和上传文件/链接");
-    
-    onAddPortfolioItem({
-      id: Date.now().toString(),
-      title: newItem.title,
-      category: newItem.category,
-      imageUrl: newItem.url,
-      mediaType: newItem.type,
-      date: new Date().toISOString().slice(0, 7).replace('-', '.')
-    });
-    
-    setNewItem({ ...newItem, title: '', url: '' });
-  };
-
-  const handlePortfolioFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    // Size limit check (5MB)
-    if (file.size > 5 * 1024 * 1024) {
-      alert("文件过大！为了保证网页流畅，请上传小于 5MB 的文件，或使用外部链接。\nFile too large (>5MB). Please use URL for large files.");
-      e.target.value = '';
-      return;
-    }
-
-    try {
-      setIsProcessingPortfolio(true);
-      if (file.type.startsWith('image/')) {
-         // Compress portfolio images to HD (1920px max)
-         const compressed = await compressImage(file, 1920, 0.85);
-         setNewItem({ ...newItem, url: compressed, type: 'image' });
-      } else if (file.type.startsWith('video/')) {
-         // For video, we read as DataURL but warn about storage
-         const reader = new FileReader();
-         reader.onload = (evt) => {
-            const res = evt.target?.result as string;
-            setNewItem({ ...newItem, url: res, type: 'video' });
-            setIsProcessingPortfolio(false);
-         };
-         reader.readAsDataURL(file);
-         // Don't process further here
-         return;
-      }
-    } catch (err) {
-      console.error(err);
-      alert("文件读取失败");
-    } finally {
-      if (!file.type.startsWith('video/')) {
-         setIsProcessingPortfolio(false);
-      }
-    }
-  };
+  // Forms State
+  const [newPortfolioItem, setNewPortfolioItem] = useState<Partial<PortfolioItem>>({ category: 'ui', mediaType: 'image' });
 
   const handleAvatarUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
+      if(file.size > 5 * 1024 * 1024) {
+          alert("图片过大，请选择小于 5MB 的图片。\nImage too large.");
+          return;
+      }
+      setIsUploading(true);
       try {
-        setIsProcessingAvatar(true);
-        // Compress avatar to max width 300px
-        const compressedBase64 = await compressImage(file, 300, 0.8);
-        setUserData({...userData, avatar: compressedBase64});
-      } catch (error) {
-        console.error("Avatar compression failed", error);
-        alert("图片处理失败，请重试。\nImage processing failed.");
+          const compressed = await compressImage(file, 300, 0.8);
+          onUpdateUser({ ...user, avatar: compressed });
+      } catch (err) {
+          console.error(err);
+          alert("图片处理失败");
       } finally {
-        setIsProcessingAvatar(false);
+          setIsUploading(false);
       }
     }
   };
 
-  const handleBgUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      try {
-        setIsProcessingBg(true);
-        // Compress background to max width 1920px and lower quality for performance
-        const compressedBase64 = await compressImage(file, 1920, 0.6);
-        setLocalTheme({...localTheme, backgroundImage: compressedBase64});
-      } catch (error) {
-        console.error("Background compression failed", error);
-        alert("图片处理失败，请重试。\nImage processing failed.");
-      } finally {
-        setIsProcessingBg(false);
+  const handleBackgroundUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      if (file) {
+        if(file.size > 10 * 1024 * 1024) {
+            alert("背景图过大，建议小于 10MB。\nFile too large.");
+            return;
+        }
+        setIsUploading(true);
+        try {
+            const compressed = await compressImage(file, 1920, 0.6);
+            onUpdateTheme({ ...theme, backgroundImage: compressed });
+        } catch (err) {
+            console.error(err);
+            alert("图片处理失败");
+        } finally {
+            setIsUploading(false);
+        }
       }
+  };
+
+  const handlePortfolioFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+      
+      const isVideo = file.type.startsWith('video');
+      
+      if (isVideo) {
+          if (file.size > 10 * 1024 * 1024) {
+              alert("视频文件过大(>10MB)，请使用外部链接(URL)或在工具箱转换。\nVideo too large, please use URL.");
+              return;
+          }
+      } else {
+          if (file.size > 8 * 1024 * 1024) {
+              alert("图片过大，请使用压缩工具或上传小于8MB的图片。");
+              return;
+          }
+      }
+
+      setIsUploading(true);
+      try {
+          let result = '';
+          if (isVideo) {
+             const reader = new FileReader();
+             reader.readAsDataURL(file);
+             result = await new Promise<string>((resolve) => {
+                 reader.onload = (ev) => resolve(ev.target?.result as string);
+             });
+             setNewPortfolioItem({ ...newPortfolioItem, imageUrl: result, mediaType: 'video' });
+          } else {
+             result = await compressImage(file, 1000, 0.75);
+             setNewPortfolioItem({ ...newPortfolioItem, imageUrl: result, mediaType: 'image' });
+          }
+      } catch (err) {
+          alert("文件读取失败");
+      } finally {
+          setIsUploading(false);
+      }
+  };
+
+  const handleAddPortfolio = () => {
+    if (newPortfolioItem.title && newPortfolioItem.imageUrl) {
+      onAddPortfolioItem({
+        id: Date.now().toString(),
+        title: newPortfolioItem.title,
+        category: newPortfolioItem.category || 'ui',
+        imageUrl: newPortfolioItem.imageUrl,
+        mediaType: newPortfolioItem.mediaType || 'image',
+        date: new Date().toLocaleDateString()
+      });
+      setNewPortfolioItem({ category: 'ui', mediaType: 'image', title: '', imageUrl: '' });
+      const fileInput = document.getElementById('portfolio-file-upload') as HTMLInputElement;
+      if (fileInput) fileInput.value = '';
     }
+  };
+
+  const handleGenerateDeployCode = () => {
+      const code = `
+// 将此代码复制到 App.tsx 顶部的初始数据区域
+// Copy this to the top of App.tsx to replace INITIAL constants
+
+const INITIAL_USER: UserProfile = ${JSON.stringify(user, null, 2)};
+
+const INITIAL_CATEGORIES: BusinessCategory[] = ${JSON.stringify(categories, null, 2)};
+
+const INITIAL_PORTFOLIO: PortfolioItem[] = ${JSON.stringify(portfolio, null, 2)};
+
+const INITIAL_THEME: ThemeSettings = ${JSON.stringify(theme, null, 2)};
+
+// 如果需要同步排单数据:
+const INITIAL_SLOTS: CommissionSlot[] = ${JSON.stringify(scheduleSlots || [], null, 2)};
+
+const INITIAL_TEMPLATES: ImportTemplate[] = ${JSON.stringify(templates || [], null, 2)};
+      `;
+      setDeployCode(code);
+      setShowDeployCode(true);
+  };
+
+  const handleToolFileConvert = (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+
+      setIsConverting(true);
+      if (file.size > 15 * 1024 * 1024) {
+          alert("警告：文件超过15MB，转换可能会导致浏览器卡顿。\nWarning: File > 15MB.");
+      }
+
+      const reader = new FileReader();
+      reader.onload = (evt) => {
+          const res = evt.target?.result as string;
+          setToolOutput(res);
+          setIsConverting(false);
+      };
+      reader.onerror = () => {
+          alert("转换失败");
+          setIsConverting(false);
+      };
+      reader.readAsDataURL(file);
+  };
+
+  // Helper to update specific category index
+  const updateCategory = (idx: number, field: keyof BusinessCategory, val: string) => {
+     const newCats = [...categories];
+     newCats[idx] = { ...newCats[idx], [field]: val };
+     onUpdateCategories(newCats);
   };
 
   return (
-    <div className="max-w-4xl animate-fade-in pb-12">
-      <div className="mb-8">
-        <h2 className="text-3xl font-bold text-slate-800 tracking-tight flex items-center gap-2">
-          Settings <Sparkles size={24} className="text-slate-300" />
-        </h2>
-        <p className="text-slate-500 mt-2 font-light">网站内容管理与个性化设置</p>
-      </div>
-
-      {/* Tabs */}
-      <div className="glass-panel p-1.5 rounded-2xl flex gap-1 mb-8 inline-flex flex-wrap">
+    <div className="flex flex-col lg:flex-row gap-8 animate-fade-in pb-20">
+      <div className="w-full lg:w-64 flex flex-col gap-2 shrink-0">
+        <h2 className="text-2xl font-bold text-slate-800 px-4 mb-4">控制台 Console</h2>
         {[
-          { id: 'profile', label: '个人资料 Profile' },
-          { id: 'appearance', label: '外观 Appearance' },
-          { id: 'services', label: '业务类型 Services' },
-          { id: 'portfolio', label: '作品管理 Works' },
-          { id: 'data', label: '数据备份 Data' },
-        ].map(tab => (
+          { id: 'profile', label: '个人资料 Profile', icon: <Sparkles size={18} /> },
+          { id: 'business', label: '业务设置 Services', icon: <FileJson size={18} /> },
+          { id: 'portfolio', label: '作品管理 Portfolio', icon: <Image size={18} /> },
+          { id: 'theme', label: '外观装修 Theme', icon: <Palette size={18} /> },
+          { id: 'backup', label: '数据备份 Backup', icon: <UploadCloud size={18} /> },
+          { id: 'tools', label: '工具箱 Tools', icon: <Wrench size={18} /> },
+        ].map((tab) => (
           <button
             key={tab.id}
-            onClick={() => setActiveTab(tab.id as any)}
-            className={`px-6 py-2.5 text-sm font-bold rounded-xl transition-all whitespace-nowrap ${
-              activeTab === tab.id 
-                ? 'bg-white shadow-sm text-slate-800' 
-                : 'text-slate-500 hover:text-slate-700 hover:bg-white/50'
-            }`}
+            onClick={() => setActiveTab(tab.id)}
+            className={`flex items-center gap-3 px-4 py-3 rounded-xl font-bold transition-all text-sm
+              ${activeTab === tab.id 
+                ? 'bg-slate-800 text-white shadow-lg shadow-slate-300' 
+                : 'text-slate-500 hover:bg-white/50 hover:text-slate-700'}`}
           >
+            {tab.icon}
             {tab.label}
           </button>
         ))}
       </div>
 
-      {/* Profile Tab */}
-      {activeTab === 'profile' && (
-        <div className="space-y-6 animate-in slide-in-from-bottom-2 duration-300">
-          <div className="glass-card p-8 rounded-3xl">
-            <div className="grid grid-cols-1 gap-6">
-              <div className="flex flex-col gap-3">
-                <label className="text-xs font-bold text-slate-500 uppercase tracking-wider ml-1">头像 / Avatar</label>
-                <div className="flex gap-6 items-center">
-                  <div 
-                    onClick={() => !isProcessingAvatar && fileInputRef.current?.click()}
-                    className="w-24 h-24 rounded-full overflow-hidden bg-slate-100 shrink-0 border-4 border-white shadow-md relative group cursor-pointer"
-                  >
-                    {isProcessingAvatar ? (
-                        <div className="w-full h-full flex items-center justify-center bg-slate-200">
-                             <Loader2 className="animate-spin text-slate-500" />
-                        </div>
-                    ) : (
-                        <>
-                            <img src={userData.avatar} alt="Preview" className="w-full h-full object-cover group-hover:opacity-50 transition-opacity" />
-                            <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
-                            <UploadCloud className="text-slate-700" size={24} />
-                            </div>
-                        </>
-                    )}
-                  </div>
-                  <input 
-                    type="file"
-                    ref={fileInputRef}
-                    onChange={handleAvatarUpload}
-                    accept="image/*"
-                    className="hidden"
-                  />
-                  <div className="flex flex-col gap-1">
-                    <p className="text-sm font-bold text-slate-700">点击头像上传新图片</p>
-                    <p className="text-xs text-slate-400">支持 JPG, PNG, GIF (会自动压缩优化)</p>
-                    <p className="text-[10px] text-emerald-600/80 font-bold bg-emerald-50 inline-block px-1.5 py-0.5 rounded border border-emerald-100 mt-1 w-fit">推荐尺寸: 500x500px, 大小 &lt; 2MB</p>
-                  </div>
+      <div className="flex-1 glass-card rounded-3xl p-6 lg:p-8 min-h-[500px] border border-white/60 bg-white/40 backdrop-blur-xl">
+        {activeTab === 'profile' && (
+          <div className="space-y-6 max-w-2xl">
+            <div>
+              <label className="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-2">Avatar / 头像</label>
+              <div className="flex items-center gap-6">
+                <div className="w-24 h-24 rounded-full overflow-hidden bg-slate-200 ring-4 ring-white shadow-lg relative group">
+                  <img src={user.avatar} className="w-full h-full object-cover" />
+                  {isUploading && <div className="absolute inset-0 bg-black/50 flex items-center justify-center"><Loader2 className="animate-spin text-white"/></div>}
+                </div>
+                <div className="flex-1">
+                   <div className="flex gap-2 mb-2">
+                        <button 
+                            onClick={() => fileInputRef.current?.click()}
+                            disabled={isUploading}
+                            className="px-4 py-2 bg-slate-800 text-white rounded-xl text-sm font-bold shadow-md hover:bg-slate-700 transition-all flex items-center gap-2"
+                        >
+                            <UploadCloud size={16}/> 上传图片 Upload
+                        </button>
+                        <input 
+                            type="file" 
+                            ref={fileInputRef} 
+                            className="hidden" 
+                            accept="image/*"
+                            onChange={handleAvatarUpload}
+                        />
+                   </div>
+                   <p className="text-xs text-green-600 font-medium flex items-center gap-1">
+                       <Info size={12}/> 推荐尺寸 300x300px, 小于 2MB
+                   </p>
+                   <BufferedInput 
+                    value={user.avatar} 
+                    onCommit={(val: string) => onUpdateUser({...user, avatar: val})}
+                    placeholder="或输入图片 URL..."
+                    className="w-full mt-2 bg-white/50 border-b border-slate-300 px-2 py-1 text-xs outline-none focus:border-slate-800"
+                   />
                 </div>
               </div>
+            </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div className="flex flex-col gap-3">
-                  <label className="text-xs font-bold text-slate-500 uppercase tracking-wider ml-1">显示昵称</label>
-                  <input 
-                    value={userData.name}
-                    onChange={e => setUserData({...userData, name: e.target.value})}
-                    className="p-4 rounded-xl border border-white/60 bg-white/50 focus:bg-white focus:ring-4 focus:ring-primary-100/50 outline-none transition-all text-sm backdrop-blur-sm"
-                  />
-                </div>
-                <div className="flex flex-col gap-3">
-                  <label className="text-xs font-bold text-slate-500 uppercase tracking-wider ml-1">联系方式 (微信/QQ/邮箱)</label>
-                  <input 
-                    value={userData.contact}
-                    onChange={e => setUserData({...userData, contact: e.target.value})}
-                    className="p-4 rounded-xl border border-white/60 bg-white/50 focus:bg-white focus:ring-4 focus:ring-primary-100/50 outline-none transition-all text-sm backdrop-blur-sm"
-                  />
-                </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-2">Display Name</label>
+                <BufferedInput 
+                  value={user.name}
+                  onCommit={(val: string) => onUpdateUser({ ...user, name: val })}
+                  className="w-full p-3 bg-white/60 rounded-xl border border-white focus:ring-2 focus:ring-primary-200 outline-none font-bold text-slate-700"
+                />
               </div>
-
-              <div className="flex flex-col gap-3">
-                <label className="text-xs font-bold text-slate-500 uppercase tracking-wider ml-1">个性签名 / 简介</label>
-                <textarea 
-                  value={userData.bio}
-                  onChange={e => setUserData({...userData, bio: e.target.value})}
-                  rows={3}
-                  className="p-4 rounded-xl border border-white/60 bg-white/50 focus:bg-white focus:ring-4 focus:ring-primary-100/50 outline-none transition-all text-sm resize-none backdrop-blur-sm"
+              <div>
+                <label className="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-2">Contact Method</label>
+                <BufferedInput 
+                  value={user.contact}
+                  onCommit={(val: string) => onUpdateUser({ ...user, contact: val })}
+                  className="w-full p-3 bg-white/60 rounded-xl border border-white focus:ring-2 focus:ring-primary-200 outline-none font-medium text-slate-600"
                 />
               </div>
             </div>
-          </div>
-          <div className="flex justify-end">
-            <button onClick={handleSaveProfile} className="flex items-center gap-2 px-8 py-3 bg-slate-800 text-white rounded-2xl font-bold hover:bg-slate-700 shadow-xl hover:-translate-y-0.5 transition-all">
-              <Save size={18} /> 保存资料
-            </button>
-          </div>
-        </div>
-      )}
 
-      {/* Appearance Tab */}
-      {activeTab === 'appearance' && (
-        <div className="space-y-6 animate-in slide-in-from-bottom-2 duration-300">
-           <div className="glass-card p-8 rounded-3xl">
-              <div className="grid grid-cols-1 gap-8">
-                  
-                  {/* Background */}
-                  <div>
-                      <h3 className="font-bold text-slate-700 flex items-center gap-2 mb-4">
-                          <Palette size={18} /> 背景设置 / Background
-                      </h3>
-                      <div className="flex flex-col gap-6">
-                          <input 
-                             type="file" 
-                             ref={bgInputRef}
-                             onChange={handleBgUpload}
-                             accept="image/*"
-                             className="hidden"
-                          />
-                          <div className="flex flex-col md:flex-row gap-6 items-start">
-                              <div className="flex flex-col gap-3 items-center">
-                                {localTheme.backgroundImage ? (
-                                    <div className="w-48 h-28 rounded-xl overflow-hidden border-2 border-slate-200 shadow-md relative group bg-slate-100">
-                                        <img src={localTheme.backgroundImage} className="w-full h-full object-cover"/>
-                                        <button 
-                                          onClick={() => setLocalTheme({...localTheme, backgroundImage: ''})}
-                                          className="absolute top-2 right-2 p-1.5 bg-red-500 text-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity"
-                                        >
-                                          <Trash2 size={12}/>
-                                        </button>
-                                    </div>
-                                ) : (
-                                    <div className="w-48 h-28 rounded-xl bg-gradient-to-r from-pink-100 to-blue-100 border-2 border-slate-200 border-dashed shadow-inner flex items-center justify-center text-xs text-slate-400 font-bold">
-                                        默认背景 Default
-                                    </div>
-                                )}
-                                <div className="flex flex-col items-center gap-2">
-                                  <button 
-                                      onClick={() => !isProcessingBg && bgInputRef.current?.click()} 
-                                      disabled={isProcessingBg}
-                                      className="px-4 py-2 bg-white border border-slate-200 rounded-lg text-sm font-bold text-slate-600 hover:bg-slate-50 flex items-center gap-2 shadow-sm disabled:opacity-70"
-                                  >
-                                    {isProcessingBg ? <Loader2 size={14} className="animate-spin"/> : <UploadCloud size={14}/>} 
-                                    {isProcessingBg ? '处理中...' : '上传新图片'}
-                                  </button>
-                                  <p className="text-[10px] text-slate-400 font-medium">建议 1920x1080px, &lt; 5MB</p>
-                                </div>
-                              </div>
-
-                              <div className="flex-1 w-full space-y-4">
-                                  {/* Background Size Control */}
-                                  <div className="bg-white/50 p-4 rounded-xl border border-white/60">
-                                      <label className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-3 block">图片填充方式 (Size)</label>
-                                      <div className="flex gap-2">
-                                          {[
-                                              { val: 'cover', label: '铺满 Cover', icon: Monitor },
-                                              { val: 'contain', label: '适应 Contain', icon: Smartphone },
-                                              { val: 'auto', label: '原始 Auto', icon: Minimize },
-                                          ].map(opt => (
-                                              <button
-                                                  key={opt.val}
-                                                  onClick={() => setLocalTheme({...localTheme, backgroundSize: opt.val as any})}
-                                                  className={`flex-1 py-2 rounded-lg text-xs font-bold flex items-center justify-center gap-2 transition-all ${localTheme.backgroundSize === opt.val ? 'bg-slate-800 text-white shadow-md' : 'bg-white hover:bg-slate-100 text-slate-600 border border-slate-200'}`}
-                                              >
-                                                  <opt.icon size={12} /> {opt.label}
-                                              </button>
-                                          ))}
-                                      </div>
-                                  </div>
-
-                                  {/* Overlay Opacity */}
-                                  <div className="bg-white/50 p-4 rounded-xl border border-white/60">
-                                      <label className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2 block">背景白膜浓度 (Overlay Opacity)</label>
-                                      <div className="flex items-center gap-4">
-                                          <input 
-                                            type="range" 
-                                            min="0" 
-                                            max="1" 
-                                            step="0.05" 
-                                            value={localTheme.overlayOpacity}
-                                            onChange={(e) => setLocalTheme({...localTheme, overlayOpacity: parseFloat(e.target.value)})}
-                                            className="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer"
-                                          />
-                                          <span className="text-sm font-bold w-12 text-right">{(localTheme.overlayOpacity * 100).toFixed(0)}%</span>
-                                      </div>
-                                  </div>
-                              </div>
-                          </div>
-                      </div>
-                  </div>
-
-                  <hr className="border-slate-200/50" />
-
-                  {/* Fonts */}
-                  <div>
-                      <h3 className="font-bold text-slate-700 flex items-center gap-2 mb-4">
-                          <Type size={18} /> 字体设置 / Typography
-                      </h3>
-                      
-                      <div className="bg-white/50 p-6 rounded-2xl border border-white/60 space-y-4">
-                          <div>
-                              <label className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2 block">自定义字体文件链接 (Custom Font URL)</label>
-                              <div className="flex gap-2">
-                                  <input 
-                                    value={localTheme.customFontUrl || ''}
-                                    onChange={(e) => setLocalTheme({...localTheme, customFontUrl: e.target.value})}
-                                    placeholder="https://example.com/font.woff2"
-                                    className="flex-1 p-3 rounded-xl border border-white/60 bg-white/50 text-sm focus:bg-white focus:ring-4 focus:ring-primary-100/50 outline-none transition-all font-mono text-slate-600"
-                                  />
-                              </div>
-                              <p className="text-[10px] text-slate-400 mt-2">
-                                  * 请输入字体文件 (WOFF2/TTF) 的直链 URL。保存后系统会自动加载并应用该字体。<br/>
-                                  * Enter a direct URL to a font file. It will be applied automatically after saving.
-                              </p>
-                          </div>
-                          
-                          {!localTheme.customFontUrl && (
-                              <div>
-                                  <label className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2 block">或选择预设字体 (Or Select Preset)</label>
-                                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                                      {[
-                                          { id: 'sans', name: '标准黑体' },
-                                          { id: 'serif', name: '优雅宋体' },
-                                          { id: 'artistic', name: '古风楷体' },
-                                          { id: 'handwriting', name: '手写草书' }
-                                      ].map((f) => (
-                                          <button
-                                              key={f.id}
-                                              onClick={() => setLocalTheme({...localTheme, font: f.id as FontStyle})}
-                                              className={`py-2 px-3 rounded-lg text-xs font-bold border transition-all ${localTheme.font === f.id ? 'bg-primary-50 border-primary-300 text-primary-700' : 'bg-white border-slate-200 text-slate-500 hover:border-slate-300'}`}
-                                          >
-                                              {f.name}
-                                          </button>
-                                      ))}
-                                  </div>
-                              </div>
-                          )}
-                      </div>
-                  </div>
-
-              </div>
-           </div>
-
-           <div className="flex justify-end sticky bottom-6 pt-4">
-             <button onClick={handleSaveTheme} className="flex items-center gap-2 px-8 py-3 bg-slate-800 text-white rounded-2xl font-bold hover:bg-slate-700 shadow-xl hover:-translate-y-0.5 transition-all">
-                <Save size={18} /> 保存并同步设置 (Save & Sync)
-             </button>
-           </div>
-        </div>
-      )}
-
-      {/* Services Tab */}
-      {activeTab === 'services' && (
-        <div className="space-y-6 animate-in slide-in-from-bottom-2 duration-300">
-          <div className="grid grid-cols-1 gap-6">
-            {localCategories.map((cat, idx) => (
-              <div key={cat.id} className="glass-card p-6 rounded-3xl relative group transition-all hover:bg-white/60">
-                <button 
-                  onClick={() => setLocalCategories(prev => prev.filter(c => c.id !== cat.id))}
-                  className="absolute top-4 right-4 text-slate-300 hover:text-red-500 transition-colors w-8 h-8 flex items-center justify-center rounded-full hover:bg-red-50"
-                >
-                  <Trash2 size={16} />
-                </button>
-                
-                <h4 className="text-xs font-bold text-slate-400 mb-4 uppercase tracking-widest ml-1">Service #{idx + 1}</h4>
-                
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-                  <div>
-                    <label className="text-xs font-bold text-slate-500 mb-2 block ml-1">业务名称</label>
-                    <input 
-                      value={cat.name}
-                      onChange={e => updateCategory(cat.id, 'name', e.target.value)}
-                      className="w-full p-3 rounded-xl border border-white/60 bg-white/50 text-sm font-bold text-slate-700 focus:bg-white focus:ring-4 focus:ring-primary-100/50 outline-none transition-all"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-xs font-bold text-slate-500 mb-2 block ml-1">价格范围</label>
-                    <input 
-                      value={cat.priceRange}
-                      onChange={e => updateCategory(cat.id, 'priceRange', e.target.value)}
-                      className="w-full p-3 rounded-xl border border-white/60 bg-white/50 text-sm font-bold text-slate-700 focus:bg-white focus:ring-4 focus:ring-primary-100/50 outline-none transition-all"
-                    />
-                  </div>
-                </div>
-
-                <div className="mb-4">
-                  <label className="text-xs font-bold text-slate-500 mb-2 block ml-1">卡片简述 (首页显示)</label>
-                  <input 
-                    value={cat.description}
-                    onChange={e => updateCategory(cat.id, 'description', e.target.value)}
-                    className="w-full p-3 rounded-xl border border-white/60 bg-white/50 text-sm focus:bg-white focus:ring-4 focus:ring-primary-100/50 outline-none transition-all"
-                  />
-                </div>
-
-                <div>
-                  <label className="text-xs font-bold text-slate-500 mb-2 block ml-1">详情页内容 (支持 Markdown 风格换行)</label>
-                  <textarea 
-                    value={cat.details || ''}
-                    onChange={e => updateCategory(cat.id, 'details', e.target.value)}
-                    rows={4}
-                    className="w-full p-3 rounded-xl border border-white/60 bg-white/50 text-sm focus:bg-white focus:ring-4 focus:ring-primary-100/50 outline-none resize-none font-mono transition-all"
-                    placeholder="在此输入详细的业务介绍、工期说明等..."
-                  />
-                </div>
-              </div>
-            ))}
-            
-            <button 
-              onClick={handleAddCategory}
-              className="w-full py-6 border-2 border-dashed border-slate-300/50 rounded-3xl text-slate-400 font-bold hover:border-primary-300 hover:text-primary-500 hover:bg-white/30 transition-all flex items-center justify-center gap-2"
-            >
-              <Plus size={20} /> 添加新业务类型
-            </button>
-          </div>
-          
-          <div className="flex justify-end sticky bottom-6 pt-4">
-            <button onClick={handleSaveCategories} className="flex items-center gap-2 px-8 py-3 bg-slate-800 text-white rounded-2xl font-bold hover:bg-slate-700 shadow-xl transition-all hover:-translate-y-0.5">
-              <Save size={18} /> 保存业务设置
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Portfolio Tab */}
-      {activeTab === 'portfolio' && (
-        <div className="space-y-6 animate-in slide-in-from-bottom-2 duration-300">
-          <div className="glass-card p-8 rounded-3xl">
-            <h3 className="font-bold text-slate-800 mb-6 flex items-center gap-2 text-lg">
-              <span className="w-8 h-8 rounded-lg bg-primary-100 flex items-center justify-center text-primary-500"><Plus size={18} strokeWidth={3}/></span> 
-              添加新作品
-            </h3>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-              <input 
-                placeholder="作品标题 Title"
-                value={newItem.title}
-                onChange={e => setNewItem({...newItem, title: e.target.value})}
-                className="p-4 rounded-xl border border-white/60 bg-white/50 text-sm outline-none focus:bg-white focus:ring-4 focus:ring-primary-100/50 transition-all"
+            <div>
+              <label className="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-2">Bio / 简介</label>
+              <BufferedTextArea 
+                value={user.bio}
+                onCommit={(val: string) => onUpdateUser({ ...user, bio: val })}
+                className="w-full p-3 h-32 bg-white/60 rounded-xl border border-white focus:ring-2 focus:ring-primary-200 outline-none resize-none text-slate-600"
               />
-              <select 
-                value={newItem.category}
-                onChange={e => setNewItem({...newItem, category: e.target.value})}
-                className="p-4 rounded-xl border border-white/60 bg-white/50 text-sm outline-none focus:bg-white focus:ring-4 focus:ring-primary-100/50 transition-all"
-              >
-                {localCategories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-              </select>
             </div>
-            
-            <div className="flex flex-col sm:flex-row gap-4 mb-6">
-               <div className="flex items-center gap-2 bg-white/50 p-1.5 rounded-xl border border-white/60 shrink-0">
-                  <button 
-                    onClick={() => setNewItem({...newItem, type: 'image'})}
-                    className={`px-4 py-2.5 rounded-lg flex items-center gap-2 text-sm transition-all font-bold ${newItem.type === 'image' ? 'bg-white shadow-sm text-primary-600' : 'text-slate-400 hover:bg-white/30'}`}
-                  >
-                    <Image size={16} /> 图片
-                  </button>
-                  <button 
-                    onClick={() => setNewItem({...newItem, type: 'video'})}
-                    className={`px-4 py-2.5 rounded-lg flex items-center gap-2 text-sm transition-all font-bold ${newItem.type === 'video' ? 'bg-white shadow-sm text-primary-600' : 'text-slate-400 hover:bg-white/30'}`}
-                  >
-                    <Film size={16} /> 视频(MP4)
-                  </button>
-               </div>
-               
-               <div className="flex-1 flex gap-2">
-                  <input 
-                    placeholder={newItem.type === 'image' ? "输入图片 URL 或上传文件 ->" : "输入视频 URL (推荐) 或上传小文件 ->"}
-                    value={newItem.url}
-                    onChange={e => setNewItem({...newItem, url: e.target.value})}
-                    className="flex-1 p-4 rounded-xl border border-white/60 bg-white/50 text-sm outline-none focus:bg-white focus:ring-4 focus:ring-primary-100/50 transition-all"
-                  />
-                  <div className="relative">
-                    <button 
-                        onClick={() => !isProcessingPortfolio && portfolioFileInputRef.current?.click()}
-                        disabled={isProcessingPortfolio}
-                        className="h-full px-4 bg-white border border-white/60 rounded-xl hover:bg-slate-50 transition-colors flex items-center justify-center gap-2 text-slate-500 font-bold"
-                        title="上传文件 Upload File"
-                    >
-                        {isProcessingPortfolio ? <Loader2 size={20} className="animate-spin text-primary-500"/> : <UploadCloud size={20}/>}
-                    </button>
-                    <input 
-                        type="file"
-                        ref={portfolioFileInputRef}
-                        onChange={handlePortfolioFileUpload}
-                        accept={newItem.type === 'image' ? "image/*" : "video/*"}
-                        className="hidden"
+          </div>
+        )}
+
+        {activeTab === 'business' && (
+          <div className="space-y-8">
+            <div className="grid grid-cols-1 gap-4">
+              {categories.map((cat, idx) => (
+                <div key={cat.id} className="bg-white/50 p-4 rounded-2xl border border-white/60 flex flex-col md:flex-row gap-4 group hover:bg-white/80 transition-colors">
+                  <div className="flex-1 space-y-2">
+                    <BufferedInput 
+                      value={cat.name}
+                      onCommit={(val: string) => updateCategory(idx, 'name', val)}
+                      className="font-bold text-slate-700 bg-transparent border-b border-transparent hover:border-slate-300 focus:border-slate-800 outline-none w-full"
+                    />
+                    <BufferedInput 
+                      value={cat.priceRange}
+                      onCommit={(val: string) => updateCategory(idx, 'priceRange', val)}
+                      className="text-sm text-primary-600 font-bold bg-transparent border-b border-transparent hover:border-slate-300 focus:border-primary-500 outline-none w-full"
+                    />
+                    <BufferedTextArea 
+                      value={cat.description}
+                      onCommit={(val: string) => updateCategory(idx, 'description', val)}
+                      className="text-xs text-slate-500 bg-transparent w-full resize-none outline-none h-12"
+                      placeholder="简短描述..."
+                    />
+                     <BufferedTextArea 
+                      value={cat.details || ''}
+                      onCommit={(val: string) => updateCategory(idx, 'details', val)}
+                      className="text-xs text-slate-500 bg-black/5 w-full resize-y outline-none h-20 p-2 rounded-lg"
+                      placeholder="详细业务说明 (展开后可见)..."
                     />
                   </div>
-               </div>
+                  <button 
+                    onClick={() => {
+                        if(confirm('确认删除此业务类型？')) {
+                            onUpdateCategories(categories.filter(c => c.id !== cat.id));
+                        }
+                    }}
+                    className="p-2 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-xl self-start"
+                  >
+                    <Trash2 size={18} />
+                  </button>
+                </div>
+              ))}
             </div>
-            
             <button 
-              onClick={submitNewItem}
-              disabled={isProcessingPortfolio}
-              className="w-full py-3.5 bg-slate-800 text-white rounded-xl font-bold hover:bg-slate-700 transition-all text-sm shadow-lg hover:shadow-xl hover:-translate-y-0.5 disabled:opacity-50 disabled:cursor-not-allowed"
+              onClick={() => onUpdateCategories([...categories, { id: Date.now().toString(), name: '新业务 New Service', priceRange: '¥?', description: '描述 Description', details: '详情 Details' }])}
+              className="w-full py-3 border-2 border-dashed border-slate-300 rounded-2xl text-slate-400 font-bold hover:border-slate-400 hover:text-slate-600 hover:bg-slate-50 transition-all flex items-center justify-center gap-2"
             >
-              {isProcessingPortfolio ? '正在处理文件...' : '确认发布作品'}
+              <Plus size={20} /> 添加业务 Add Service
             </button>
           </div>
+        )}
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            {portfolio.map(item => (
-              <div key={item.id} className="flex items-center gap-4 p-4 glass-card rounded-2xl hover:bg-white/60 transition-colors">
-                 <div className="w-20 h-20 rounded-xl bg-slate-100 overflow-hidden shrink-0 border border-white/50 shadow-sm">
-                    {item.mediaType === 'video' ? (
-                       <video src={item.imageUrl} className="w-full h-full object-cover opacity-80" />
-                    ) : (
-                       <img src={item.imageUrl} className="w-full h-full object-cover" />
-                    )}
+        {/* Portfolio - No BufferedInputs needed for adding new items as it's local state already */}
+        {activeTab === 'portfolio' && (
+          <div className="space-y-8">
+            <div className="bg-white/60 p-6 rounded-2xl border border-white shadow-sm">
+              <h3 className="font-bold text-slate-700 mb-4 flex items-center gap-2"><Plus size={18}/> 添加新作品 Add Work</h3>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                <input 
+                  placeholder="标题 Title"
+                  value={newPortfolioItem.title}
+                  onChange={e => setNewPortfolioItem({...newPortfolioItem, title: e.target.value})}
+                  className="p-3 rounded-xl bg-white border border-slate-200 outline-none focus:ring-2 focus:ring-slate-200"
+                />
+                <select 
+                  value={newPortfolioItem.category}
+                  onChange={e => setNewPortfolioItem({...newPortfolioItem, category: e.target.value})}
+                  className="p-3 rounded-xl bg-white border border-slate-200 outline-none"
+                >
+                  {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                </select>
+              </div>
+
+              {/* Upload or URL Switch */}
+              <div className="mb-4 space-y-3">
+                 <div className="flex gap-2 text-sm">
+                     <span className="font-bold text-slate-500">媒体源 Media Source:</span>
                  </div>
-                 <div className="flex-1 min-w-0">
-                    <h4 className="font-bold text-slate-800 truncate mb-1">{item.title}</h4>
-                    <div className="flex gap-2">
-                       <span className="text-[10px] text-slate-500 bg-white/50 px-2 py-0.5 rounded border border-white/50 uppercase">{item.mediaType}</span>
-                       <span className="text-[10px] text-slate-400 px-2 py-0.5">{item.date}</span>
-                    </div>
+                 
+                 <div className="border-2 border-dashed border-slate-300 rounded-xl p-4 hover:bg-slate-50 transition-colors relative group">
+                     {isUploading ? (
+                         <div className="flex items-center justify-center py-2 text-slate-500 gap-2"><Loader2 className="animate-spin"/> 处理中 Processing...</div>
+                     ) : (
+                         <div className="flex flex-col items-center justify-center py-2 cursor-pointer">
+                             <input 
+                               id="portfolio-file-upload"
+                               type="file" 
+                               accept="image/*,video/mp4" 
+                               onChange={handlePortfolioFileUpload}
+                               className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
+                             />
+                             <UploadCloud className="text-slate-400 mb-2"/>
+                             <span className="text-xs font-bold text-slate-500">点击上传文件 (Click to Upload)</span>
+                             <span className="text-[10px] text-slate-400">支持 JPG/PNG/MP4 (视频限10MB)</span>
+                         </div>
+                     )}
+                 </div>
+
+                 <div className="relative">
+                    <div className="absolute inset-0 flex items-center"><div className="w-full border-t border-slate-200"></div></div>
+                    <div className="relative flex justify-center text-xs uppercase"><span className="bg-white px-2 text-slate-400">OR URL</span></div>
+                 </div>
+
+                 <input 
+                  placeholder="输入图片/视频 URL (Enter URL)..."
+                  value={newPortfolioItem.imageUrl}
+                  onChange={e => setNewPortfolioItem({...newPortfolioItem, imageUrl: e.target.value})}
+                  className="w-full p-3 rounded-xl bg-white border border-slate-200 outline-none focus:ring-2 focus:ring-slate-200 text-sm font-mono"
+                />
+                <div className="bg-blue-50 p-2 rounded-lg flex gap-2 items-start">
+                    <Info size={14} className="text-blue-500 mt-0.5 shrink-0"/>
+                    <p className="text-xs text-blue-600 leading-tight">
+                        提示：使用 "Snapshot Share" 分享时，上传的本地文件(Base64)可能因为太长而无法在链接中显示。
+                        <br/>建议使用外部链接(URL)以获得最佳分享体验。
+                    </p>
+                </div>
+              </div>
+              
+              <div className="flex justify-end gap-2">
+                 <div className="flex items-center gap-2 mr-auto">
+                    <label className="flex items-center gap-2 text-sm text-slate-600 cursor-pointer">
+                        <input 
+                            type="radio" 
+                            name="mediaType" 
+                            checked={newPortfolioItem.mediaType === 'image'} 
+                            onChange={() => setNewPortfolioItem({...newPortfolioItem, mediaType: 'image'})}
+                        /> 图片 Image
+                    </label>
+                    <label className="flex items-center gap-2 text-sm text-slate-600 cursor-pointer">
+                        <input 
+                            type="radio" 
+                            name="mediaType" 
+                            checked={newPortfolioItem.mediaType === 'video'} 
+                            onChange={() => setNewPortfolioItem({...newPortfolioItem, mediaType: 'video'})}
+                        /> 视频 Video
+                    </label>
                  </div>
                  <button 
-                   onClick={() => onDeletePortfolioItem(item.id)}
-                   className="p-3 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-xl transition-colors"
+                  onClick={handleAddPortfolio}
+                  disabled={!newPortfolioItem.imageUrl}
+                  className="px-6 py-2 bg-slate-800 text-white rounded-xl font-bold hover:bg-slate-700 disabled:opacity-50 disabled:cursor-not-allowed"
                  >
-                   <Trash2 size={18} />
+                  确认添加 Confirm
                  </button>
               </div>
-            ))}
-          </div>
-        </div>
-      )}
+            </div>
 
-      {/* Data Management Tab */}
-      {activeTab === 'data' && (
-        <div className="space-y-6 animate-in slide-in-from-bottom-2 duration-300">
-          <div className="glass-card p-8 rounded-3xl border-l-4 border-l-blue-400">
-            <h3 className="text-xl font-bold text-slate-800 mb-4 flex items-center gap-2">
-              <Download size={24} className="text-blue-500"/>
-              数据备份与恢复 / Data Backup
-            </h3>
-            <p className="text-slate-600 text-sm mb-6 leading-relaxed">
-              您的网站数据（个人资料、作品、排单）目前保存在此浏览器的本地缓存中。
-              <br/>
-              为了防止数据丢失或迁移到新设备，请定期<b>导出数据备份</b>。
-            </p>
-
-            <div className="flex flex-col sm:flex-row gap-4">
-              <button 
-                onClick={onExportData}
-                className="flex-1 py-4 bg-slate-800 text-white rounded-2xl font-bold hover:bg-slate-700 transition-all shadow-lg hover:-translate-y-0.5 flex items-center justify-center gap-2"
-              >
-                <FileJson size={20} />
-                导出数据 (JSON)
-              </button>
-              
-              <div className="flex-1">
-                <input 
-                  type="file" 
-                  ref={importInputRef}
-                  onChange={(e) => e.target.files?.[0] && onImportData(e.target.files[0])}
-                  className="hidden" 
-                  accept=".json"
-                />
-                <button 
-                   onClick={() => importInputRef.current?.click()}
-                   className="w-full py-4 bg-white/50 border border-slate-300 text-slate-700 rounded-2xl font-bold hover:bg-white hover:text-blue-600 transition-all flex items-center justify-center gap-2"
-                >
-                  <UploadCloud size={20} />
-                  导入备份 (Restore)
-                </button>
-              </div>
+            <div className="space-y-2">
+                <h4 className="font-bold text-slate-500 text-xs uppercase tracking-widest">Current Items ({portfolio.length})</h4>
+                <div className="max-h-[300px] overflow-y-auto custom-scrollbar space-y-2 pr-2">
+                    {portfolio.map(item => (
+                        <div key={item.id} className="flex items-center gap-4 bg-white/40 p-2 rounded-xl border border-white/50">
+                            <div className="w-12 h-12 rounded-lg bg-slate-200 overflow-hidden shrink-0">
+                                {item.mediaType === 'video' ? (
+                                    <video src={item.imageUrl} className="w-full h-full object-cover" />
+                                ) : (
+                                    <img src={item.imageUrl} className="w-full h-full object-cover" />
+                                )}
+                            </div>
+                            <div className="flex-1 min-w-0">
+                                <p className="font-bold text-slate-700 truncate">{item.title}</p>
+                                <p className="text-xs text-slate-500">{categories.find(c => c.id === item.category)?.name}</p>
+                            </div>
+                            <button 
+                                onClick={() => onDeletePortfolioItem(item.id)}
+                                className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg"
+                            >
+                                <Trash2 size={16}/>
+                            </button>
+                        </div>
+                    ))}
+                </div>
             </div>
           </div>
-        </div>
+        )}
+
+        {activeTab === 'theme' && (
+          <div className="space-y-8 max-w-2xl">
+             <div>
+                <label className="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-2">Wallpaper / 背景图</label>
+                <div className="flex gap-2 mb-2">
+                     <div className="relative overflow-hidden group">
+                        <button className="px-4 py-2 bg-slate-800 text-white rounded-xl text-sm font-bold shadow-md hover:bg-slate-700 transition-all flex items-center gap-2">
+                            <UploadCloud size={16}/> 上传背景 Upload
+                        </button>
+                        <input 
+                            type="file" 
+                            className="absolute inset-0 opacity-0 cursor-pointer"
+                            accept="image/*"
+                            onChange={handleBackgroundUpload}
+                        />
+                     </div>
+                     <p className="text-xs text-blue-500 flex items-center font-medium self-center"><Info size={12} className="mr-1"/> 建议 1920x1080, 小于 2MB</p>
+                </div>
+                <BufferedInput 
+                    value={theme.backgroundImage} 
+                    onCommit={(val: string) => onUpdateTheme({...theme, backgroundImage: val})}
+                    placeholder="或输入图片 URL..."
+                    className="w-full bg-white/50 border-b border-slate-300 px-2 py-1 text-xs outline-none focus:border-slate-800 mb-4"
+                />
+
+                <div className="flex gap-4 mb-4">
+                    <label className="text-xs font-bold text-slate-500 uppercase">尺寸 Mode:</label>
+                    <div className="flex gap-2">
+                        {(['cover', 'contain', 'auto'] as const).map(mode => (
+                             <button 
+                                key={mode}
+                                onClick={() => onUpdateTheme({...theme, backgroundSize: mode})}
+                                className={`px-2 py-0.5 rounded text-xs font-bold border ${theme.backgroundSize === mode ? 'bg-slate-700 text-white border-slate-700' : 'bg-white text-slate-500 border-slate-200'}`}
+                             >
+                                 {mode.toUpperCase()}
+                             </button>
+                        ))}
+                    </div>
+                </div>
+             </div>
+             
+             <div>
+                <label className="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-2">Font Style / 字体</label>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mb-4">
+                    {[
+                        { id: 'sans', name: '标准 Sans', family: 'Noto Sans SC' },
+                        { id: 'serif', name: '衬线 Serif', family: 'Noto Serif SC' },
+                        { id: 'artistic', name: '文艺 Artistic', family: 'ZCOOL XiaoWei' },
+                        { id: 'handwriting', name: '手写 Script', family: 'Long Cang' },
+                    ].map(f => (
+                        <button
+                            key={f.id}
+                            onClick={() => onUpdateTheme({ ...theme, font: f.id as FontStyle, customFontUrl: '' })}
+                            className={`p-2 rounded-xl border text-sm transition-all
+                                ${theme.font === f.id && !theme.customFontUrl 
+                                    ? 'bg-slate-800 text-white border-slate-800 shadow-md' 
+                                    : 'bg-white/40 border-white/60 hover:bg-white text-slate-600'}`}
+                            style={{ fontFamily: f.family }}
+                        >
+                            {f.name}
+                        </button>
+                    ))}
+                </div>
+                
+                <div className="bg-white/40 p-3 rounded-xl border border-white/50">
+                    <label className="text-xs font-bold text-slate-500 mb-1 block">自定义字体 URL (Custom Font .woff2/.ttf)</label>
+                    <BufferedInput 
+                      value={theme.customFontUrl || ''}
+                      onCommit={(val: string) => onUpdateTheme({ ...theme, customFontUrl: val })}
+                      placeholder="https://example.com/font.woff2"
+                      className="w-full bg-white/80 border-b border-slate-300 px-2 py-1 text-xs outline-none focus:border-slate-800"
+                    />
+                </div>
+             </div>
+
+             <div>
+                <label className="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-2">
+                    White Overlay / 遮罩浓度: {Math.round(theme.overlayOpacity * 100)}%
+                </label>
+                <input 
+                  type="range" 
+                  min="0" max="0.95" step="0.05"
+                  value={theme.overlayOpacity}
+                  onChange={(e) => onUpdateTheme({ ...theme, overlayOpacity: parseFloat(e.target.value) })}
+                  className="w-full accent-slate-800"
+                />
+             </div>
+          </div>
+        )}
+
+        {/* Tools and Backup tabs same as before, omitted for brevity as they are less interactive */}
+        {activeTab === 'backup' && (
+             <div className="space-y-8 max-w-2xl">
+                 <div className="bg-amber-50 p-4 rounded-xl border border-amber-100 flex gap-3">
+                     <Info className="text-amber-500 shrink-0" />
+                     <p className="text-sm text-amber-800">
+                         提示：本网站数据仅存储在您的浏览器中(Local Storage)。
+                         为了防止更换设备或清除缓存导致数据丢失，请定期下载备份文件 (.json)。
+                     </p>
+                 </div>
+
+                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                     <button 
+                         onClick={onExportData}
+                         className="flex items-center justify-center gap-3 p-6 bg-white/60 rounded-2xl border border-slate-200 hover:bg-white hover:shadow-lg transition-all group"
+                     >
+                         <div className="w-12 h-12 bg-slate-100 rounded-full flex items-center justify-center text-slate-600 group-hover:bg-slate-800 group-hover:text-white transition-colors">
+                             <Download size={24}/>
+                         </div>
+                         <div className="text-left">
+                             <h4 className="font-bold text-slate-700">导出数据 Export</h4>
+                             <p className="text-xs text-slate-500">下载 .json 备份文件</p>
+                         </div>
+                     </button>
+
+                     <div className="relative flex items-center justify-center gap-3 p-6 bg-white/60 rounded-2xl border border-slate-200 hover:bg-white hover:shadow-lg transition-all group cursor-pointer">
+                         <input 
+                             type="file" 
+                             accept=".json" 
+                             onChange={(e) => {
+                                 const file = e.target.files?.[0];
+                                 if(file) onImportData(file);
+                             }}
+                             className="absolute inset-0 opacity-0 cursor-pointer z-10"
+                         />
+                         <div className="w-12 h-12 bg-slate-100 rounded-full flex items-center justify-center text-slate-600 group-hover:bg-primary-500 group-hover:text-white transition-colors">
+                             <UploadCloud size={24}/>
+                         </div>
+                         <div className="text-left">
+                             <h4 className="font-bold text-slate-700">导入备份 Import</h4>
+                             <p className="text-xs text-slate-500">恢复 .json 数据文件</p>
+                         </div>
+                     </div>
+                 </div>
+
+                 <div className="pt-8 border-t border-slate-200">
+                     <h3 className="font-bold text-slate-700 mb-4 flex items-center gap-2"><Code size={18}/> 开发者选项 / Developer</h3>
+                     <button 
+                       onClick={handleGenerateDeployCode}
+                       className="px-5 py-3 bg-slate-700 text-white rounded-xl font-bold hover:bg-slate-600 transition-colors shadow-lg flex items-center gap-2"
+                     >
+                         <FileCode size={18}/> 生成部署配置代码 (Generate Config)
+                     </button>
+                     <p className="text-xs text-slate-400 mt-2">
+                         将当前配置生成为代码，用于 Vercel 部署时的默认数据。
+                     </p>
+                 </div>
+             </div>
+        )}
+
+        {activeTab === 'tools' && (
+            <div className="space-y-8 animate-in fade-in slide-in-from-right-4">
+                <div className="bg-indigo-50 p-4 rounded-xl border border-indigo-100 flex gap-3 items-start">
+                    <Wrench className="text-indigo-500 shrink-0 mt-1" size={20}/>
+                    <div>
+                        <h4 className="font-bold text-indigo-800 text-sm">实用工具箱 Utilities</h4>
+                        <p className="text-xs text-indigo-600 mt-1">
+                            此处提供一些辅助工具，帮助您更好地装修网页或处理文件。<br/>
+                            Here are some tools to help you manage assets.
+                        </p>
+                    </div>
+                </div>
+
+                <div className="space-y-4">
+                    <h3 className="font-bold text-slate-700 flex items-center gap-2">
+                        <FileCode size={20} className="text-primary-500"/> 
+                        文件转链接工具 (File to Link Converter)
+                    </h3>
+                    <div className="bg-white/60 p-6 rounded-2xl border border-white/80 shadow-sm">
+                        <div className="flex flex-col md:flex-row gap-6">
+                            <div className="flex-1 space-y-4">
+                                <label className="block border-2 border-dashed border-slate-300 rounded-xl p-8 text-center hover:bg-slate-50 transition-colors cursor-pointer relative group">
+                                    <input 
+                                        type="file" 
+                                        onChange={handleToolFileConvert}
+                                        className="absolute inset-0 opacity-0 cursor-pointer"
+                                    />
+                                    <Scissors className="mx-auto text-slate-400 mb-3 group-hover:scale-110 transition-transform" size={32}/>
+                                    <span className="block font-bold text-slate-600">点击选择文件</span>
+                                    <span className="text-xs text-slate-400">支持 JPG, PNG, GIF, MP4 (建议 &lt; 5MB)</span>
+                                </label>
+                                
+                                {isConverting && (
+                                    <div className="text-center text-sm font-bold text-slate-500 animate-pulse">
+                                        正在转换中 Converting...
+                                    </div>
+                                )}
+                            </div>
+
+                            <div className="flex-1 space-y-2">
+                                <div className="flex justify-between items-center">
+                                    <span className="text-xs font-bold text-slate-500 uppercase">输出结果 Output (Data URL)</span>
+                                    <button 
+                                      onClick={() => {
+                                          if(!toolOutput) return;
+                                          navigator.clipboard.writeText(toolOutput);
+                                          alert("已复制到剪贴板 Copied!");
+                                      }}
+                                      disabled={!toolOutput}
+                                      className="text-xs flex items-center gap-1 bg-slate-200 hover:bg-slate-300 px-2 py-1 rounded disabled:opacity-50"
+                                    >
+                                        <Copy size={12}/> 复制 Copy
+                                    </button>
+                                </div>
+                                <textarea 
+                                    readOnly
+                                    value={toolOutput}
+                                    className="w-full h-32 p-3 text-[10px] font-mono bg-slate-50 border border-slate-200 rounded-lg resize-none focus:outline-none text-slate-500"
+                                    placeholder="转换后的代码将显示在这里..."
+                                />
+                                <p className="text-[10px] text-slate-400">
+                                    * 此代码可直接填入"上传图片URL"的输入框中。<br/>
+                                    * This code works as a URL for images/videos.
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div className="pt-6 border-t border-slate-200/50">
+                    <h3 className="font-bold text-slate-700 flex items-center gap-2 mb-4">
+                        <UploadCloud size={20} className="text-blue-500"/> 
+                        推荐图床导航 (Free Image Hosting)
+                    </h3>
+                    <p className="text-xs text-slate-500 mb-4">
+                        为了获得更短的分享链接，建议将图片上传到图床，获取 <code>https://...</code> 开头的短链接。
+                    </p>
+                    
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                        {[
+                            { name: 'ImgTP', url: 'https://imgtp.com/', desc: '免费且稳定' },
+                            { name: 'SM.MS', url: 'https://sm.ms/', desc: '老牌图床' },
+                            { name: '路过图床', url: 'https://imgse.com/', desc: 'ImgSE' },
+                            { name: 'HelloImg', url: 'https://www.helloimg.com/', desc: '界面简洁' },
+                        ].map(host => (
+                            <a 
+                                key={host.name}
+                                href={host.url} 
+                                target="_blank" 
+                                rel="noopener noreferrer"
+                                className="flex flex-col items-center justify-center p-4 bg-white/60 hover:bg-white rounded-xl border border-slate-200 hover:shadow-md transition-all group"
+                            >
+                                <ExternalLink className="mb-2 text-slate-400 group-hover:text-blue-500 transition-colors" size={20}/>
+                                <span className="font-bold text-slate-700">{host.name}</span>
+                                <span className="text-[10px] text-slate-400">{host.desc}</span>
+                            </a>
+                        ))}
+                    </div>
+                </div>
+            </div>
+        )}
+
+      </div>
+
+      {showDeployCode && (
+          <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-[100] flex items-center justify-center p-6">
+              <div className="bg-white rounded-2xl w-full max-w-3xl flex flex-col max-h-[80vh] shadow-2xl">
+                  <div className="p-4 border-b border-slate-100 flex justify-between items-center">
+                      <h3 className="font-bold text-slate-800">部署配置代码 Deployment Config</h3>
+                      <button onClick={() => setShowDeployCode(false)}><X size={20} className="text-slate-400 hover:text-slate-600"/></button>
+                  </div>
+                  <div className="flex-1 p-0 overflow-hidden relative">
+                       <textarea 
+                          readOnly 
+                          value={deployCode} 
+                          className="w-full h-full p-4 bg-slate-800 text-green-400 font-mono text-xs resize-none outline-none"
+                       />
+                       <button 
+                          onClick={() => { navigator.clipboard.writeText(deployCode); alert('已复制 Copied'); }}
+                          className="absolute top-4 right-4 bg-white/10 hover:bg-white/20 text-white px-3 py-1.5 rounded text-xs font-bold backdrop-blur-md flex items-center gap-2"
+                       >
+                           <Copy size={14}/> 复制代码 Copy
+                       </button>
+                  </div>
+              </div>
+          </div>
       )}
     </div>
   );

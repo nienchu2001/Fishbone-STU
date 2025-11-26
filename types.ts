@@ -75,3 +75,11 @@ export interface AppData {
   portfolioLayout: PortfolioLayoutMode; // Persist layout choice
   lastUpdated: string;
 }
+
+// Global definition for external libraries
+declare global {
+  interface Window {
+    XLSX: any;
+    LZString: any;
+  }
+}

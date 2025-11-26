@@ -11,7 +11,7 @@ interface PortfolioGridProps extends ReadOnlyProps {
   onDelete?: (id: string) => void;
 }
 
-export const PortfolioGrid: React.FC<PortfolioGridProps> = ({ 
+export const PortfolioGrid = React.memo<PortfolioGridProps>(({ 
   items, 
   categories, 
   layoutMode = 'masonry',
@@ -34,7 +34,6 @@ export const PortfolioGrid: React.FC<PortfolioGridProps> = ({
           <p className="text-slate-500 mt-2 font-light">精选作品展示 / Selected Works</p>
         </div>
         
-        {/* Layout Switcher */}
         {!isReadOnly && onLayoutChange && (
           <div className="flex bg-white/30 p-1 rounded-xl backdrop-blur-md border border-white/50">
             <button 
@@ -62,7 +61,6 @@ export const PortfolioGrid: React.FC<PortfolioGridProps> = ({
         )}
       </div>
 
-      {/* Category Filter */}
       <div className="flex items-center gap-2 overflow-x-auto no-scrollbar pb-2">
           <button
             onClick={() => setSelectedCategory('all')}
@@ -87,7 +85,6 @@ export const PortfolioGrid: React.FC<PortfolioGridProps> = ({
           ))}
       </div>
 
-      {/* Grid Content */}
       <div className={`
         ${layoutMode === 'masonry' ? 'masonry-grid grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 auto-rows-max' : ''}
         ${layoutMode === 'grid' ? 'grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4' : ''}
@@ -102,7 +99,6 @@ export const PortfolioGrid: React.FC<PortfolioGridProps> = ({
               ${layoutMode === 'list' ? 'rounded-2xl flex flex-row h-32 md:h-40 hover:-translate-x-1' : ''}
             `}
           >
-            {/* Image Section */}
             <div className={`relative overflow-hidden
                ${layoutMode === 'list' ? 'w-32 md:w-48 h-full shrink-0' : 'w-full h-full'}
                ${layoutMode === 'masonry' ? 'aspect-auto' : ''}
@@ -125,7 +121,6 @@ export const PortfolioGrid: React.FC<PortfolioGridProps> = ({
                 />
               )}
               
-              {/* Overlay for Masonry & Grid */}
               {layoutMode !== 'list' && (
                 <div className="absolute inset-0 bg-gradient-to-t from-slate-900/60 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex flex-col justify-end p-6">
                   <div className="transform translate-y-4 group-hover:translate-y-0 transition-transform duration-300">
@@ -147,7 +142,6 @@ export const PortfolioGrid: React.FC<PortfolioGridProps> = ({
               )}
             </div>
 
-            {/* List Mode Info Panel */}
             {layoutMode === 'list' && (
               <div className="flex-1 p-6 flex flex-col justify-center">
                  <div className="flex justify-between items-start">
@@ -163,7 +157,6 @@ export const PortfolioGrid: React.FC<PortfolioGridProps> = ({
               </div>
             )}
 
-            {/* Delete Button */}
             {!isReadOnly && onDelete && (
               <button
                 onClick={(e) => {
@@ -189,4 +182,4 @@ export const PortfolioGrid: React.FC<PortfolioGridProps> = ({
       )}
     </div>
   );
-};
+});

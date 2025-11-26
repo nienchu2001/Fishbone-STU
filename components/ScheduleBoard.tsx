@@ -26,6 +26,25 @@ interface ScheduleBoardProps extends ReadOnlyProps {
   isReadOnly?: boolean;
 }
 
+const BufferedInput = React.memo(({ value, onCommit, className, placeholder, ...props }: any) => {
+  const [localValue, setLocalValue] = useState(value);
+  
+  useEffect(() => {
+    setLocalValue(value);
+  }, [value]);
+
+  return (
+    <input 
+      className={className}
+      placeholder={placeholder}
+      value={localValue}
+      onChange={e => setLocalValue(e.target.value)}
+      onBlur={() => onCommit(localValue)}
+      {...props}
+    />
+  );
+});
+
 const getStatusColor = (status: CommissionStatus) => {
     switch(status) {
         case 'waiting': return 'bg-slate-300';
@@ -78,7 +97,7 @@ const parseAttachments = (text: string = '') => {
   return { images, links };
 };
 
-export const ScheduleBoard: React.FC<ScheduleBoardProps> = ({ 
+export const ScheduleBoard = React.memo<ScheduleBoardProps>(({ 
   slots, 
   templates = [],
   onImportSlots, 
@@ -117,28 +136,24 @@ export const ScheduleBoard: React.FC<ScheduleBoardProps> = ({
   const pendingSlots = totalSlots - finishedSlots;
   const completionRate = totalSlots > 0 ? Math.round((finishedSlots / totalSlots) * 100) : 0;
   
-  // Effect to enforce calendar view when switching to read-only mode
   useEffect(() => {
     if (isReadOnly) {
       setViewMode('calendar');
     }
   }, [isReadOnly]);
 
-  // Select first template by default if available
   useEffect(() => {
     if (templates.length > 0 && !selectedTemplateId) {
       setSelectedTemplateId(templates[0].id);
     }
   }, [templates, selectedTemplateId]);
 
-  // Pagination Logic
   const totalPages = Math.ceil(slots.length / ITEMS_PER_PAGE);
   const paginatedSlots = slots.slice((currentPage - 1) * ITEMS_PER_PAGE, currentPage * ITEMS_PER_PAGE);
 
   const nextPage = () => setCurrentPage(p => Math.min(p + 1, totalPages));
   const prevPage = () => setCurrentPage(p => Math.max(p - 1, 1));
 
-  // Reset pagination if out of bounds
   useEffect(() => {
     if (currentPage > totalPages && totalPages > 0) {
       setCurrentPage(totalPages);
@@ -210,11 +225,10 @@ export const ScheduleBoard: React.FC<ScheduleBoardProps> = ({
           const workbook = window.XLSX.read(data, { type: 'binary' });
           const firstSheetName = workbook.SheetNames[0];
           const worksheet = workbook.Sheets[firstSheetName];
-          // Use header:1 to get raw 2D array
           const jsonData = window.XLSX.utils.sheet_to_json(worksheet, { 
             header: 1, 
             defval: '',
-            raw: false, // Try to format dates as strings if possible
+            raw: false,
           });
           
           processExcelRows(jsonData);
@@ -227,7 +241,7 @@ export const ScheduleBoard: React.FC<ScheduleBoardProps> = ({
       }
     };
     reader.readAsBinaryString(file);
-    e.target.value = ''; // Reset input
+    e.target.value = '';
   };
 
   const handleTextImport = () => {
@@ -241,8 +255,6 @@ export const ScheduleBoard: React.FC<ScheduleBoardProps> = ({
   const processExcelRows = (rows: any[][]) => {
     if (!rows || rows.length === 0) return;
 
-    // 1. Identify Header Row
-    // Scan first 5 rows for standard keywords
     let headerRowIndex = -1;
     
     for (let i = 0; i < Math.min(rows.length, 5); i++) {
@@ -254,11 +266,10 @@ export const ScheduleBoard: React.FC<ScheduleBoardProps> = ({
     }
 
     const newSlots: CommissionSlot[] = [];
-    const startIndex = headerRowIndex + 1; // Start processing AFTER the header row
+    const startIndex = headerRowIndex + 1;
 
-    // 2. Identify Column Indices
     let nameIdx = -1, typeIdx = -1, dateIdx = -1;
-    let standardIndices: number[] = []; // Indices of columns we found as standard (Name/Type/Date)
+    let standardIndices: number[] = [];
     let headers: string[] = [];
 
     if (headerRowIndex !== -1) {
@@ -276,18 +287,15 @@ export const ScheduleBoard: React.FC<ScheduleBoardProps> = ({
                 dateIdx = idx;
                 standardIndices.push(idx);
             } else if (lowerH.includes('状态') || lowerH.includes('status') || lowerH.includes('进度') || lowerH.includes('progress')) {
-                 // We don't import status directly usually, but mark it as standard so it doesn't clutter details
                  standardIndices.push(idx);
             }
         });
     } else {
-        // Fallback if no header found: Assume Col A=Name, Col B=Type, Col C=Date
         nameIdx = 0; standardIndices.push(0);
         typeIdx = 1; standardIndices.push(1);
         dateIdx = 2; standardIndices.push(2);
     }
 
-    // 3. Process Rows
     for (let i = startIndex; i < rows.length; i++) {
         const row = rows[i];
         if (!row || row.length === 0) continue;
@@ -296,7 +304,6 @@ export const ScheduleBoard: React.FC<ScheduleBoardProps> = ({
         let type = (typeIdx !== -1 && row[typeIdx]) ? String(row[typeIdx]).trim() : '默认业务';
         let date = (dateIdx !== -1 && row[dateIdx]) ? String(row[dateIdx]).trim() : '';
         
-        // Orphan row check: if name is empty
         if (!name) {
              const hasData = row.some(c => String(c).trim().length > 0);
              if (hasData) {
@@ -306,28 +313,22 @@ export const ScheduleBoard: React.FC<ScheduleBoardProps> = ({
              }
         }
 
-        // Handle Excel Date Numbers (e.g., 45321)
         if (!isNaN(Number(date)) && Number(date) > 40000) {
             const dateObj = new Date(Math.round((Number(date) - 25569) * 86400 * 1000));
             date = dateObj.toISOString().split('T')[0];
         }
 
-        // Clean up date string if it has text around it
         const dateMatch = date.match(/(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})/);
         if (dateMatch) {
             date = `${dateMatch[1]}-${dateMatch[2].padStart(2,'0')}-${dateMatch[3].padStart(2,'0')}`;
         }
 
-        // 4. Aggregate Details (Requirements)
-        // Collect ALL columns that are NOT standard columns into the Requirements field
         let detailsArr: string[] = [];
         row.forEach((cell, idx) => {
             if (!standardIndices.includes(idx)) {
                 const val = String(cell).trim();
                 if (val) {
-                    // Use header name if available, otherwise "Column X"
                     const label = (headers[idx] && headers[idx] !== 'undefined') ? headers[idx] : `列${idx+1}`;
-                    // Special Handling for potential image URLs in text cells
                     detailsArr.push(`【${label}】: ${val}`);
                 }
             }
@@ -354,18 +355,10 @@ export const ScheduleBoard: React.FC<ScheduleBoardProps> = ({
     }
   };
 
-
-  /**
-   * Smart Text Block Processor
-   * Supports: Key-Value Blocks AND Paragraph lists
-   */
   const processBlockText = (text: string) => {
     const newSlots: CommissionSlot[] = [];
-    
-    // Normalize text
     const cleanText = text.replace(/\r\n/g, '\n');
 
-    // Strategy 1: Detect Blocks by keywords (Name:, Type:, etc)
     const blockRegex = /(?:昵称|单主|Name|ID|约稿人|客户)[：:]\s*(.*?)(?=\n(?:昵称|单主|Name|ID|约稿人|客户)[：:]|$)/gis;
     let match;
     let strategy1Count = 0;
@@ -392,8 +385,6 @@ export const ScheduleBoard: React.FC<ScheduleBoardProps> = ({
       }
     }
 
-    // Strategy 2: Fallback (Paragraph Mode) - If Strategy 1 found nothing
-    // Splits by double newline. First line = Name, Second line = Type (optional), Rest = Note
     if (strategy1Count === 0) {
        const blocks = cleanText.split(/\n\s*\n/).filter(b => b.trim());
        blocks.forEach((block, idx) => {
@@ -416,7 +407,6 @@ export const ScheduleBoard: React.FC<ScheduleBoardProps> = ({
       onImportSlots(newSlots);
       setShowImport(false);
       setPasteContent('');
-      // Non-blocking success toast could go here, using alert for now
       setTimeout(() => alert(`成功识别并导入 ${newSlots.length} 个排单！`), 100);
     } else {
       alert("无法识别内容，请尝试使用标准格式：\n昵称：XXX\n业务：XXX\n日期：XXX");
@@ -435,7 +425,6 @@ export const ScheduleBoard: React.FC<ScheduleBoardProps> = ({
     const firstDay = new Date(currentDate.getFullYear(), currentDate.getMonth(), 1).getDay();
     const days = Array.from({ length: daysInMonth }, (_, i) => i + 1);
     
-    // Get slots for this month
     const monthSlots = slots.filter(s => {
       const d = new Date(s.deadline);
       return !isNaN(d.getTime()) && 
@@ -504,7 +493,6 @@ export const ScheduleBoard: React.FC<ScheduleBoardProps> = ({
         const base64 = reader.result as string;
         const slot = slots.find(s => s.id === slotId);
         if (slot) {
-           // Append image markdown or url to requirements
            const currentReq = slot.requirements || '';
            const newReq = currentReq + `\n\n【附件图片 Attachment】: ${base64}`;
            onUpdateSlot(slotId, { requirements: newReq });
@@ -514,9 +502,7 @@ export const ScheduleBoard: React.FC<ScheduleBoardProps> = ({
     }
   };
 
-  // Group finished slots by Month for the report
   const finishedByMonth = finishedSlotsList.reduce((acc, slot) => {
-      // Handle both deadline dates and potentially updated_at if we had it, fallback to deadline
       const d = new Date(slot.deadline);
       const key = isNaN(d.getTime()) ? 'Unknown Date' : d.toLocaleString('default', { month: 'long', year: 'numeric' });
       if (!acc[key]) acc[key] = [];
@@ -533,7 +519,6 @@ export const ScheduleBoard: React.FC<ScheduleBoardProps> = ({
         </div>
         
         <div className="flex gap-3">
-          {/* Only show view toggles if NOT read-only */}
           {!isReadOnly && (
             <div className="bg-white/40 p-1 rounded-xl flex border border-white/50 backdrop-blur-md">
               <button 
@@ -563,9 +548,7 @@ export const ScheduleBoard: React.FC<ScheduleBoardProps> = ({
         </div>
       </div>
 
-      {/* Stats Dashboard */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6">
-         {/* Total */}
          <div className="glass-card p-5 rounded-2xl flex items-center justify-between bg-gradient-to-br from-indigo-50/50 to-purple-50/50 border border-white/60 hover:-translate-y-1 transition-transform duration-300">
              <div>
                 <p className="text-[10px] md:text-xs font-bold text-slate-400 uppercase tracking-widest mb-1">总单量 Total</p>
@@ -576,7 +559,6 @@ export const ScheduleBoard: React.FC<ScheduleBoardProps> = ({
              </div>
          </div>
          
-         {/* Pending */}
          <div className="glass-card p-5 rounded-2xl flex items-center justify-between bg-gradient-to-br from-orange-50/50 to-amber-50/50 border border-white/60 hover:-translate-y-1 transition-transform duration-300">
              <div>
                 <p className="text-[10px] md:text-xs font-bold text-slate-400 uppercase tracking-widest mb-1">待还 Pending</p>
@@ -587,7 +569,6 @@ export const ScheduleBoard: React.FC<ScheduleBoardProps> = ({
              </div>
          </div>
 
-         {/* Finished - Clickable for Report */}
          <div 
            onClick={() => !isReadOnly && setShowFinishedReport(true)}
            className={`glass-card p-5 rounded-2xl flex items-center justify-between bg-gradient-to-br from-emerald-50/50 to-teal-50/50 border border-white/60 transition-transform duration-300 ${!isReadOnly ? 'hover:-translate-y-1 cursor-pointer hover:shadow-md' : ''}`}
@@ -602,7 +583,6 @@ export const ScheduleBoard: React.FC<ScheduleBoardProps> = ({
              </div>
          </div>
 
-         {/* Rate */}
          <div className="glass-card p-5 rounded-2xl flex items-center justify-between bg-gradient-to-br from-blue-50/50 to-cyan-50/50 border border-white/60 hover:-translate-y-1 transition-transform duration-300">
              <div>
                 <p className="text-[10px] md:text-xs font-bold text-slate-400 uppercase tracking-widest mb-1">完成率 Rate</p>
@@ -617,7 +597,6 @@ export const ScheduleBoard: React.FC<ScheduleBoardProps> = ({
       {viewMode === 'calendar' ? renderCalendar() : (
         <>
         <div className="space-y-4">
-          {/* Header Row */}
           <div className="hidden md:grid grid-cols-12 gap-4 px-6 py-3 text-xs font-bold text-slate-400 uppercase tracking-wider">
             <div className="col-span-3">Client / Project</div>
             <div className="col-span-2">Deadline</div>
@@ -641,7 +620,6 @@ export const ScheduleBoard: React.FC<ScheduleBoardProps> = ({
                 className="glass-card rounded-2xl p-6 md:p-4 hover:bg-white/60 transition-all duration-300 group border-l-4 border-l-transparent hover:border-l-primary-400 bg-white/40 backdrop-blur-xl border border-white/50"
               >
                 <div className="flex flex-col md:grid md:grid-cols-12 gap-4 items-center">
-                  {/* Client Info */}
                   <div className="w-full md:col-span-3 flex items-center gap-4">
                     <div className={`w-10 h-10 rounded-full flex items-center justify-center font-bold text-white shadow-lg shrink-0 border-2 border-white
                       ${slot.status === 'finished' ? 'bg-gradient-to-br from-emerald-400 to-emerald-500' : 'bg-gradient-to-br from-slate-700 to-slate-800'}`}>
@@ -649,9 +627,9 @@ export const ScheduleBoard: React.FC<ScheduleBoardProps> = ({
                     </div>
                     <div className="flex-1 min-w-0">
                       {!isReadOnly && onUpdateSlot ? (
-                        <input 
+                        <BufferedInput 
                           value={slot.clientName}
-                          onChange={(e) => onUpdateSlot(slot.id, { clientName: e.target.value })}
+                          onCommit={(val: string) => onUpdateSlot(slot.id, { clientName: val })}
                           className="font-bold text-slate-800 bg-transparent border-b border-transparent hover:border-slate-300 focus:border-primary-300 focus:outline-none w-full truncate transition-colors mb-1"
                           placeholder="客户/项目名称"
                         />
@@ -660,9 +638,9 @@ export const ScheduleBoard: React.FC<ScheduleBoardProps> = ({
                       )}
                       
                       {!isReadOnly && onUpdateSlot ? (
-                        <input 
+                        <BufferedInput 
                           value={slot.type}
-                          onChange={(e) => onUpdateSlot(slot.id, { type: e.target.value })}
+                          onCommit={(val: string) => onUpdateSlot(slot.id, { type: val })}
                           className="text-xs text-slate-500 font-medium bg-white/50 hover:bg-white px-2 py-0.5 rounded inline-block border border-transparent hover:border-slate-300 focus:border-primary-300 focus:outline-none transition-colors w-full max-w-[150px]"
                           placeholder="业务类型"
                         />
@@ -674,14 +652,13 @@ export const ScheduleBoard: React.FC<ScheduleBoardProps> = ({
                     </div>
                   </div>
 
-                  {/* Deadline - Editable */}
                   <div className="w-full md:col-span-2 flex md:block items-center justify-between">
                      <span className="md:hidden text-xs font-bold text-slate-400">DDL:</span>
                      {!isReadOnly && onUpdateSlot ? (
-                       <input 
+                       <BufferedInput 
                          type="date"
                          value={slot.deadline === 'TBD' ? '' : slot.deadline}
-                         onChange={(e) => onUpdateSlot(slot.id, { deadline: e.target.value })}
+                         onCommit={(val: string) => onUpdateSlot(slot.id, { deadline: val })}
                          className="bg-transparent text-sm font-bold text-slate-600 hover:bg-white/50 px-2 py-1 rounded cursor-pointer focus:outline-none focus:ring-2 focus:ring-primary-200"
                        />
                      ) : (
@@ -692,13 +669,11 @@ export const ScheduleBoard: React.FC<ScheduleBoardProps> = ({
                      )}
                   </div>
 
-                  {/* Status Badge */}
                   <div className="w-full md:col-span-3 flex md:block items-center justify-between">
                     <span className="md:hidden text-xs font-bold text-slate-400">Status:</span>
                     <StatusBadge status={slot.status} />
                   </div>
 
-                  {/* Progress Bar */}
                   <div className="w-full md:col-span-2 space-y-2">
                     <div className="flex justify-between text-xs font-bold text-slate-500">
                       <span>Progress</span>
@@ -713,7 +688,6 @@ export const ScheduleBoard: React.FC<ScheduleBoardProps> = ({
                     </div>
                   </div>
 
-                  {/* Actions */}
                   <div className="w-full md:col-span-2 flex items-center justify-end gap-2 mt-4 md:mt-0">
                     {!isReadOnly && (
                       <>
@@ -736,7 +710,6 @@ export const ScheduleBoard: React.FC<ScheduleBoardProps> = ({
                           </button>
                         )}
                         
-                        {/* Always show delete for easier management */}
                         <button 
                           onClick={() => {
                             if(confirm(`确认删除 ${slot.clientName} 的排单吗？`)) {
@@ -753,7 +726,6 @@ export const ScheduleBoard: React.FC<ScheduleBoardProps> = ({
                   </div>
                 </div>
 
-                {/* Expanded Details Panel */}
                 {expandedId === slot.id && !isReadOnly && (
                   <div className="mt-6 pt-6 border-t border-slate-200/50 grid grid-cols-1 md:grid-cols-2 gap-6 animate-in fade-in slide-in-from-top-2">
                     <div className="space-y-4">
@@ -784,12 +756,10 @@ export const ScheduleBoard: React.FC<ScheduleBoardProps> = ({
                         onChange={(e) => onUpdateSlot && onUpdateSlot(slot.id, { requirements: e.target.value })}
                       />
                       
-                      {/* Attachments Visualization */}
                       {(images.length > 0 || links.length > 0) && (
                           <div className="bg-white/50 rounded-xl p-3 border border-white/60 shadow-sm backdrop-blur-md">
                               <p className="text-[10px] font-bold text-slate-400 uppercase mb-2 flex items-center gap-1"><Sparkles size={10}/> 附件 / Attachments</p>
                               
-                              {/* Image Gallery */}
                               {images.length > 0 && (
                                   <div className="grid grid-cols-4 gap-2 mb-3">
                                       {images.map((img, idx) => (
@@ -801,7 +771,6 @@ export const ScheduleBoard: React.FC<ScheduleBoardProps> = ({
                                   </div>
                               )}
 
-                              {/* Link List */}
                               {links.length > 0 && (
                                   <div className="flex flex-col gap-1">
                                       {links.map((link, idx) => (
@@ -841,7 +810,6 @@ export const ScheduleBoard: React.FC<ScheduleBoardProps> = ({
           )}
         </div>
         
-        {/* Pagination Controls */}
         {slots.length > ITEMS_PER_PAGE && (
             <div className="flex justify-center items-center gap-4 pt-4">
                 <button 
@@ -866,7 +834,6 @@ export const ScheduleBoard: React.FC<ScheduleBoardProps> = ({
         </>
       )}
 
-      {/* Finished Report Modal */}
       {showFinishedReport && (
         <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-md z-[999] flex items-center justify-center p-4">
            <div className="bg-white/90 rounded-3xl w-full max-w-3xl max-h-[85vh] flex flex-col shadow-2xl animate-in zoom-in-95 duration-200 border border-white/50">
@@ -878,7 +845,6 @@ export const ScheduleBoard: React.FC<ScheduleBoardProps> = ({
                </div>
                
                <div className="flex-1 overflow-y-auto p-6 space-y-8 custom-scrollbar">
-                   {/* Summary Cards */}
                    <div className="grid grid-cols-2 gap-4">
                        <div className="bg-emerald-50 rounded-2xl p-4 border border-emerald-100 flex items-center gap-4">
                            <div className="p-3 bg-white rounded-full text-emerald-500 shadow-sm"><CheckCircle2 size={24}/></div>
@@ -898,7 +864,6 @@ export const ScheduleBoard: React.FC<ScheduleBoardProps> = ({
                        </div>
                    </div>
 
-                   {/* Monthly Breakdown */}
                    <div className="space-y-6">
                        {Object.keys(finishedByMonth).length === 0 ? (
                            <p className="text-center text-slate-400 py-8">暂无已完成订单 / No finished orders yet.</p>
@@ -937,7 +902,6 @@ export const ScheduleBoard: React.FC<ScheduleBoardProps> = ({
         </div>
       )}
 
-      {/* Import Modal */}
       {showImport && (
         <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-md z-[999] flex items-center justify-center p-4">
           <div className="bg-white/90 rounded-3xl w-full max-w-4xl max-h-[90vh] overflow-y-auto shadow-2xl animate-in zoom-in-95 duration-200 flex flex-col border border-white/50">
@@ -951,7 +915,6 @@ export const ScheduleBoard: React.FC<ScheduleBoardProps> = ({
             </div>
             
             <div className="p-6 space-y-8">
-              {/* Option 1: File Upload - Highlighted */}
               <div className="bg-blue-50/50 border-2 border-dashed border-blue-200 rounded-2xl p-8 text-center hover:bg-blue-50 transition-colors group cursor-pointer relative">
                 <input 
                   type="file" 
@@ -978,9 +941,7 @@ export const ScheduleBoard: React.FC<ScheduleBoardProps> = ({
                   <div className="flex-grow border-t border-slate-200"></div>
               </div>
 
-              {/* Option 2: Text Import */}
               <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                {/* Template Sidebar */}
                 <div className="bg-slate-50 rounded-2xl p-4 border border-slate-200 flex flex-col h-[400px]">
                    <div className="flex justify-between items-center mb-4">
                        <h4 className="font-bold text-slate-700 text-sm">常用模板 Templates</h4>
@@ -1022,7 +983,6 @@ export const ScheduleBoard: React.FC<ScheduleBoardProps> = ({
                    </div>
                 </div>
 
-                {/* Editor / Paste Area */}
                 <div className="md:col-span-2 flex flex-col h-[400px]">
                    {isEditingTemplate ? (
                        <div className="flex flex-col h-full bg-white rounded-2xl border-2 border-primary-100 overflow-hidden">
@@ -1077,4 +1037,4 @@ export const ScheduleBoard: React.FC<ScheduleBoardProps> = ({
       )}
     </div>
   );
-};
+});

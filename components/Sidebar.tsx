@@ -11,16 +11,18 @@ interface SidebarProps {
   isVisitor?: boolean;
   saveStatus?: 'saved' | 'saving';
   onToggleReadOnly?: () => void;
+  onShare?: () => void;
 }
 
-export const Sidebar: React.FC<SidebarProps> = ({ 
+export const Sidebar = React.memo<SidebarProps>(({ 
   currentView, 
   onChangeView, 
   user, 
   isReadOnly, 
   isVisitor, 
   saveStatus = 'saved',
-  onToggleReadOnly 
+  onToggleReadOnly,
+  onShare
 }) => {
   const [showShareTooltip, setShowShareTooltip] = useState(false);
 
@@ -30,19 +32,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
     { id: 'schedule', label: '排单档期', icon: Calendar },
   ] as const;
 
-  const handleShare = () => {
-    // Generate a URL with the visitor mode parameter AND the artist's name (nickname)
-    const url = new URL(window.location.href);
-    url.searchParams.set('mode', 'visitor');
-    if (user.name) {
-       url.searchParams.set('artist', user.name);
-    }
-    const shareableLink = url.toString();
-
-    navigator.clipboard.writeText(shareableLink).then(() => {
+  const handleShareClick = () => {
+    if (onShare) {
+      onShare();
       setShowShareTooltip(true);
-      setTimeout(() => setShowShareTooltip(false), 2500);
-    });
+      setTimeout(() => setShowShareTooltip(false), 3000);
+    }
   };
 
   return (
@@ -52,7 +47,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
           <div className="w-12 h-12 lg:w-20 lg:h-20 rounded-full overflow-hidden ring-4 ring-white/50 shadow-lg transition-transform transform group-hover:scale-105 bg-slate-200">
             <img src={user.avatar} alt="Profile" className="w-full h-full object-cover" />
           </div>
-          {/* Online/Edit status dot - only for admin */}
           {!isReadOnly && (
             <div className="absolute bottom-0 right-0 w-4 h-4 bg-emerald-400 rounded-full border-2 border-white lg:hidden"></div>
           )}
@@ -89,7 +83,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
           );
         })}
 
-        {/* Settings Button - Only visible if NOT read-only */}
         {!isReadOnly && (
           <button
             onClick={() => onChangeView('settings')}
@@ -110,27 +103,24 @@ export const Sidebar: React.FC<SidebarProps> = ({
         )}
       </nav>
 
-      {/* Action Buttons */}
       <div className="p-4 w-full space-y-4">
-        {/* Share Button - Hidden for Visitors */}
         {!isVisitor && (
           !isReadOnly ? (
             <div className="relative">
               <button 
-                onClick={handleShare}
+                onClick={handleShareClick}
                 className="w-full flex items-center justify-center gap-2 py-3 bg-slate-800 text-white rounded-xl font-bold shadow-lg hover:bg-slate-700 transition-all hover:-translate-y-0.5"
               >
                 {showShareTooltip ? <Check size={18} /> : <Share2 size={18} />}
                 <span className="hidden lg:inline">{showShareTooltip ? '链接已复制' : '分享主页'}</span>
               </button>
               {showShareTooltip && (
-                <div className="absolute -top-14 left-1/2 -translate-x-1/2 bg-slate-900 text-white text-xs py-2 px-3 rounded-lg whitespace-nowrap animate-fade-in shadow-xl z-50">
-                  专属链接已复制<br/>Copied!
+                <div className="absolute -top-20 left-1/2 -translate-x-1/2 bg-slate-900 text-white text-xs py-2 px-3 rounded-lg whitespace-nowrap animate-fade-in shadow-xl z-[9999] pointer-events-none">
+                  专属链接已生成并复制！<br/>Snapshot Link Copied!
                 </div>
               )}
             </div>
           ) : (
-            // Exit Preview Button - Only for Admin previewing, NOT for Visitor
             <button 
               onClick={onToggleReadOnly}
               className="w-full flex items-center justify-center gap-2 py-3 bg-white/50 text-slate-600 border border-slate-200 rounded-xl font-bold hover:bg-white transition-all"
@@ -141,13 +131,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
           )
         )}
 
-        {/* Contact Info */}
         <div className="hidden lg:block bg-white/40 backdrop-blur-sm rounded-2xl p-4 border border-white/50 shadow-sm">
           <p className="text-[10px] text-slate-400 font-bold mb-1 uppercase tracking-wider">CONTACT</p>
           <p className="text-xs text-slate-600 font-medium truncate opacity-80" title={user.contact}>{user.contact}</p>
         </div>
 
-        {/* Auto-Save Indicator (Only for Admin) */}
         {!isVisitor && (
            <div className={`hidden lg:flex items-center justify-center gap-1.5 text-[10px] font-bold transition-colors ${saveStatus === 'saving' ? 'text-blue-500' : 'text-slate-300'}`}>
               <Cloud size={12} className={saveStatus === 'saving' ? 'animate-pulse' : ''}/>
@@ -157,4 +145,4 @@ export const Sidebar: React.FC<SidebarProps> = ({
       </div>
     </aside>
   );
-};
+});
