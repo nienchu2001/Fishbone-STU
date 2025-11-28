@@ -1,10 +1,12 @@
 
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, Suspense } from 'react';
 import { Sidebar } from './components/Sidebar';
-import { PortfolioGrid } from './components/PortfolioGrid';
-import { ScheduleBoard } from './components/ScheduleBoard';
-import { SettingsPanel } from './components/SettingsPanel';
-import { ServicesList } from './components/ServicesList';
+// Lazy load heavy components to reduce initial bundle size and main thread blocking
+const PortfolioGrid = React.lazy(() => import('./components/PortfolioGrid').then(m => ({ default: m.PortfolioGrid })));
+const ScheduleBoard = React.lazy(() => import('./components/ScheduleBoard').then(m => ({ default: m.ScheduleBoard })));
+const SettingsPanel = React.lazy(() => import('./components/SettingsPanel').then(m => ({ default: m.SettingsPanel })));
+const ServicesList = React.lazy(() => import('./components/ServicesList').then(m => ({ default: m.ServicesList })));
+
 import { ViewState, UserProfile, BusinessCategory, PortfolioItem, CommissionSlot, CommissionStatus, AppData, ImportTemplate, ThemeSettings, PortfolioLayoutMode } from './types';
 import { X, Copy, Check, FileCode, Zap, Info, Link as LinkIcon, Scissors, Loader2, Globe } from 'lucide-react';
 
@@ -100,19 +102,6 @@ const DEFAULT_STATE: AppData = {
     lastUpdated: new Date().toISOString()
 };
 
-const loadInitialState = (): AppData => {
-  try {
-    const saved = localStorage.getItem(STORAGE_KEY);
-    if (saved) {
-      const parsed = JSON.parse(saved);
-      return { ...DEFAULT_STATE, ...parsed };
-    }
-  } catch (e) {
-    console.warn("Could not load local storage data.", e);
-  }
-  return DEFAULT_STATE;
-};
-
 // --- ULTRA COMPRESSION HELPERS V3 (Base36 Dates & Aggressive Stripping) ---
 
 const BASE_DATE = new Date('2023-01-01').getTime();
@@ -161,7 +150,7 @@ const mapIntToStatus = (i: number) => STATUS_ORDER[i] || 'waiting';
 // Pack Data into Ultra-Lite Array V3
 const packData = (data: AppData): any[] => {
     // 1. User: [name, contact, avatar_url_only]
-    // ALLOW Base64 Avatars now (removed stripping)
+    // ALLOW Base64 Avatars (removed stripping to support local avatars in snapshot)
     const safeAvatar = compressUrl(data.user.avatar);
     
     const u = [
@@ -171,7 +160,7 @@ const packData = (data: AppData): any[] => {
     ];
 
     // 2. Theme: [bg_url_only, font_idx, opacity, custom_font_url]
-    // ALLOW Base64 Backgrounds now (removed stripping)
+    // ALLOW Base64 Backgrounds (removed stripping)
     const safeBg = compressUrl(data.theme.backgroundImage);
     
     const fontIdx = Math.max(0, FONT_ORDER.indexOf(data.theme.font));
@@ -197,7 +186,7 @@ const packData = (data: AppData): any[] => {
     const catIdToIndex = new Map(data.categories.map((c, i) => [c.id, i]));
     const p = data.portfolio.map(item => {
         // STILL STRIP Base64 images from portfolio to prevent massive link explosion
-        // Portfolio items are too numerous to include base64
+        // Portfolio items are too numerous to include base64 in a URL
         if (item.imageUrl.startsWith('data:')) return null;
         
         const catIdx = catIdToIndex.get(item.category) ?? 0;
@@ -282,7 +271,10 @@ const App: React.FC = () => {
   const [isReadOnly, setIsReadOnly] = useState(false);
   const [isVisitor, setIsVisitor] = useState(false);
   const [saveStatus, setSaveStatus] = useState<'saved' | 'saving'>('saved');
-  const [data, setData] = useState<AppData>(loadInitialState);
+  
+  // Start with default, hydrate async
+  const [data, setData] = useState<AppData>(DEFAULT_STATE);
+  const [isHydrating, setIsHydrating] = useState(true);
 
   // Share Modal State
   const [showShareModal, setShowShareModal] = useState(false);
@@ -297,65 +289,78 @@ const App: React.FC = () => {
   // Destructure
   const { user, categories, portfolio, scheduleSlots, importTemplates, theme, portfolioLayout } = data;
 
-  // --- 1. Hydrate from URL Param (Snapshot Sharing) ---
+  // --- 1. Async Data Hydration ---
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const mode = params.get('mode');
-    const encodedData = params.get('data');
+    const hydrate = async () => {
+        // Allow a small tick for UI to render loading state
+        await new Promise(r => setTimeout(r, 10));
 
-    if (mode === 'visitor') {
-      setIsReadOnly(true);
-      setIsVisitor(true);
-      
-      if (encodedData && window.LZString) {
-          try {
-              const decompressed = window.LZString.decompressFromEncodedURIComponent(encodedData);
-              if (decompressed) {
-                  const parsed = JSON.parse(decompressed);
-                  
-                  // Check if it's the new Array format (Ultra Mini) or old Object format
-                  let hydratedData: Partial<AppData> = {};
-                  if (Array.isArray(parsed)) {
-                      hydratedData = unpackData(parsed);
-                  } else {
-                      hydratedData = parsed; // Legacy support
+        const params = new URLSearchParams(window.location.search);
+        const mode = params.get('mode');
+        const encodedData = params.get('data');
+
+        if (mode === 'visitor') {
+          // Visitor Mode Hydration
+          setIsReadOnly(true);
+          setIsVisitor(true);
+          
+          if (encodedData && window.LZString) {
+              try {
+                  const decompressed = window.LZString.decompressFromEncodedURIComponent(encodedData);
+                  if (decompressed) {
+                      const parsed = JSON.parse(decompressed);
+                      let hydratedData: Partial<AppData> = {};
+                      if (Array.isArray(parsed)) {
+                          hydratedData = unpackData(parsed);
+                      } else {
+                          hydratedData = parsed; // Legacy support
+                      }
+                      setData({ ...DEFAULT_STATE, ...hydratedData });
                   }
-                  
-                  // Merge
-                  setData({ ...DEFAULT_STATE, ...hydratedData });
+              } catch (e) {
+                  console.error("Failed to decompress shared data", e);
+                  // Keep default state on error
               }
-          } catch (e) {
-              console.error("Failed to decompress shared data", e);
-              alert("链接数据损坏或过期 / Link data invalid");
           }
-      } else {
-        setData(DEFAULT_STATE);
-      }
-    }
+        } else {
+          // Admin Mode Hydration (LocalStorage)
+          try {
+            const saved = localStorage.getItem(STORAGE_KEY);
+            if (saved) {
+              const parsed = JSON.parse(saved);
+              setData({ ...DEFAULT_STATE, ...parsed });
+            }
+          } catch (e) {
+            console.warn("Could not load local storage data.", e);
+          }
+        }
+        
+        setIsHydrating(false);
+    };
+
+    hydrate();
   }, []);
 
   // --- 2. Auto-Save Logic (Optimized) ---
-  const isFirstRender = useRef(true);
   useEffect(() => {
-    if (isFirstRender.current) {
-      isFirstRender.current = false;
-      return;
-    }
-    if (!isVisitor) {
-        const save = async () => {
-          setSaveStatus('saving');
-          try {
-            await new Promise(resolve => setTimeout(resolve, 0));
-            localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
-            setSaveStatus('saved');
-          } catch (e) {
-            console.error("Save failed", e);
-          }
-        };
-        const timer = setTimeout(save, 2000);
-        return () => clearTimeout(timer);
-    }
-  }, [data, isVisitor]);
+    // Prevent saving default state over user data during hydration, or if visitor
+    if (isHydrating || isVisitor) return;
+
+    const save = async () => {
+      setSaveStatus('saving');
+      try {
+        await new Promise(resolve => setTimeout(resolve, 0)); // Next tick
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+        setSaveStatus('saved');
+      } catch (e) {
+        console.error("Save failed", e);
+      }
+    };
+    
+    // Debounce save to prevent freezing during typing
+    const timer = setTimeout(save, 2000);
+    return () => clearTimeout(timer);
+  }, [data, isVisitor, isHydrating]);
 
   // --- 3. Dynamic Font Injection ---
   useEffect(() => {
@@ -406,9 +411,6 @@ const App: React.FC = () => {
       setIsShortening(true);
       setShortLinkError(false);
       try {
-          // Using TinyURL's public API to create a short link
-          // Note: In some strict browser environments, this might face CORS issues.
-          // We use a simple fetch here.
           const response = await fetch(`https://tinyurl.com/api-create.php?url=${encodeURIComponent(shareUrl)}`);
           if (response.ok) {
               const shortUrl = await response.text();
@@ -505,6 +507,17 @@ const App: React.FC = () => {
     backgroundAttachment: 'fixed',
   } : {}; 
 
+  if (isHydrating) {
+      return (
+          <div className="min-h-screen flex items-center justify-center bg-slate-50">
+              <div className="flex flex-col items-center gap-4">
+                  <Loader2 className="animate-spin text-primary-500" size={40} />
+                  <p className="text-sm font-bold text-slate-400 uppercase tracking-widest">Loading Studio...</p>
+              </div>
+          </div>
+      );
+  }
+
   return (
     <div className="min-h-screen text-slate-800 flex transition-all duration-500" 
          style={{ ...backgroundStyle, fontFamily: getFontFamily() }}>
@@ -536,51 +549,57 @@ const App: React.FC = () => {
             </div>
 
             <div className="min-h-[80vh]">
-              {view === 'portfolio' && (
-                <PortfolioGrid 
-                  items={portfolio} 
-                  categories={categories} 
-                  layoutMode={portfolioLayout}
-                  onLayoutChange={handleUpdateLayout}
-                  isReadOnly={isReadOnly}
-                  onDelete={handleDeletePortfolioItem}
-                />
-              )}
-              
-              {view === 'schedule' && (
-                <ScheduleBoard 
-                  slots={scheduleSlots} 
-                  templates={importTemplates}
-                  onImportSlots={handleImportSchedule}
-                  onAdvanceStatus={handleAdvanceStatus}
-                  onUpdateSlot={handleUpdateSlot}
-                  onDeleteSlot={handleDeleteSlot}
-                  onUpdateTemplates={handleUpdateTemplates}
-                  isReadOnly={isReadOnly}
-                />
-              )}
+              <Suspense fallback={
+                <div className="flex items-center justify-center h-64">
+                   <Loader2 className="animate-spin text-slate-300" size={32} />
+                </div>
+              }>
+                {view === 'portfolio' && (
+                    <PortfolioGrid 
+                    items={portfolio} 
+                    categories={categories} 
+                    layoutMode={portfolioLayout}
+                    onLayoutChange={handleUpdateLayout}
+                    isReadOnly={isReadOnly}
+                    onDelete={handleDeletePortfolioItem}
+                    />
+                )}
+                
+                {view === 'schedule' && (
+                    <ScheduleBoard 
+                    slots={scheduleSlots} 
+                    templates={importTemplates}
+                    onImportSlots={handleImportSchedule}
+                    onAdvanceStatus={handleAdvanceStatus}
+                    onUpdateSlot={handleUpdateSlot}
+                    onDeleteSlot={handleDeleteSlot}
+                    onUpdateTemplates={handleUpdateTemplates}
+                    isReadOnly={isReadOnly}
+                    />
+                )}
 
-              {view === 'services' && (
-                 <ServicesList categories={categories} user={user} />
-              )}
-              
-              {view === 'settings' && !isReadOnly && (
-                <SettingsPanel 
-                  user={user} 
-                  categories={categories}
-                  portfolio={portfolio}
-                  theme={theme}
-                  scheduleSlots={scheduleSlots}
-                  templates={importTemplates}
-                  onUpdateUser={handleUpdateUser}
-                  onUpdateCategories={handleUpdateCategories}
-                  onUpdateTheme={handleUpdateTheme}
-                  onAddPortfolioItem={handleAddPortfolioItem}
-                  onDeletePortfolioItem={handleDeletePortfolioItem}
-                  onExportData={handleExportData}
-                  onImportData={handleImportData}
-                />
-              )}
+                {view === 'services' && (
+                    <ServicesList categories={categories} user={user} />
+                )}
+                
+                {view === 'settings' && !isReadOnly && (
+                    <SettingsPanel 
+                    user={user} 
+                    categories={categories}
+                    portfolio={portfolio}
+                    theme={theme}
+                    scheduleSlots={scheduleSlots}
+                    templates={importTemplates}
+                    onUpdateUser={handleUpdateUser}
+                    onUpdateCategories={handleUpdateCategories}
+                    onUpdateTheme={handleUpdateTheme}
+                    onAddPortfolioItem={handleAddPortfolioItem}
+                    onDeletePortfolioItem={handleDeletePortfolioItem}
+                    onExportData={handleExportData}
+                    onImportData={handleImportData}
+                    />
+                )}
+              </Suspense>
             </div>
 
             <footer className="mt-20 pt-8 border-t border-slate-200/30 text-center text-slate-400 text-sm backdrop-blur-sm rounded-t-xl">

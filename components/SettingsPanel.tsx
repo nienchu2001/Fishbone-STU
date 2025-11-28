@@ -1,7 +1,7 @@
 
 import React, { useState, useRef, useEffect } from 'react';
 import { UserProfile, BusinessCategory, PortfolioItem, MediaType, ThemeSettings, FontStyle, CommissionSlot, ImportTemplate } from '../types';
-import { Save, Plus, Trash2, Image, Film, Sparkles, UploadCloud, Download, FileJson, Palette, Type, LayoutTemplate, Monitor, Smartphone, Minimize, Loader2, X, Code, Copy, Info, Wrench, ExternalLink, FileCode, Scissors } from 'lucide-react';
+import { Save, Plus, Trash2, Image, Film, Sparkles, UploadCloud, Download, FileJson, Palette, Type, LayoutTemplate, Monitor, Smartphone, Minimize, Loader2, X, Code, Copy, Info, Wrench, ExternalLink, FileCode, Scissors, Check } from 'lucide-react';
 
 interface SettingsPanelProps {
   user: UserProfile;
@@ -20,11 +20,9 @@ interface SettingsPanelProps {
 }
 
 // Optimized Buffered Input Component
-// This maintains its own local state and only triggers updates on blur
 const BufferedInput = React.memo(({ value, onCommit, className, placeholder, ...props }: any) => {
   const [localValue, setLocalValue] = useState(value);
   
-  // Sync if external value changes significantly (unlikely during typing due to memo, but safe to have)
   useEffect(() => {
     setLocalValue(value);
   }, [value]);
@@ -114,6 +112,14 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
   const [isUploading, setIsUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   
+  // Local state for explicit URL inputs
+  const [avatarUrlInput, setAvatarUrlInput] = useState(user.avatar);
+  const [bgUrlInput, setBgUrlInput] = useState(theme.backgroundImage);
+
+  // Sync when props change (e.g. after upload)
+  useEffect(() => { setAvatarUrlInput(user.avatar); }, [user.avatar]);
+  useEffect(() => { setBgUrlInput(theme.backgroundImage); }, [theme.backgroundImage]);
+
   // Deployment Code Gen State
   const [showDeployCode, setShowDeployCode] = useState(false);
   const [deployCode, setDeployCode] = useState('');
@@ -264,7 +270,6 @@ const INITIAL_TEMPLATES: ImportTemplate[] = ${JSON.stringify(templates || [], nu
       reader.readAsDataURL(file);
   };
 
-  // Helper to update specific category index
   const updateCategory = (idx: number, field: keyof BusinessCategory, val: string) => {
      const newCats = [...categories];
      newCats[idx] = { ...newCats[idx], [field]: val };
@@ -327,12 +332,21 @@ const INITIAL_TEMPLATES: ImportTemplate[] = ${JSON.stringify(templates || [], nu
                    <p className="text-xs text-green-600 font-medium flex items-center gap-1">
                        <Info size={12}/> 推荐尺寸 300x300px, 小于 2MB
                    </p>
-                   <BufferedInput 
-                    value={user.avatar} 
-                    onCommit={(val: string) => onUpdateUser({...user, avatar: val})}
-                    placeholder="或输入图片 URL..."
-                    className="w-full mt-2 bg-white/50 border-b border-slate-300 px-2 py-1 text-xs outline-none focus:border-slate-800"
-                   />
+                   
+                   <div className="flex gap-2 mt-3 items-center">
+                        <input 
+                            value={avatarUrlInput} 
+                            onChange={(e) => setAvatarUrlInput(e.target.value)}
+                            placeholder="或输入图片 URL (https://...)"
+                            className="flex-1 bg-white/50 border border-slate-300 rounded-lg px-3 py-2 text-xs outline-none focus:border-slate-800 focus:bg-white transition-colors"
+                        />
+                        <button 
+                            onClick={() => onUpdateUser({...user, avatar: avatarUrlInput})}
+                            className="px-3 py-2 bg-slate-200 hover:bg-slate-300 text-slate-600 rounded-lg text-xs font-bold transition-colors flex items-center gap-1"
+                        >
+                            <Check size={14}/> 应用 Apply
+                        </button>
+                   </div>
                 </div>
               </div>
             </div>
@@ -418,7 +432,6 @@ const INITIAL_TEMPLATES: ImportTemplate[] = ${JSON.stringify(templates || [], nu
           </div>
         )}
 
-        {/* Portfolio - No BufferedInputs needed for adding new items as it's local state already */}
         {activeTab === 'portfolio' && (
           <div className="space-y-8">
             <div className="bg-white/60 p-6 rounded-2xl border border-white shadow-sm">
@@ -439,7 +452,6 @@ const INITIAL_TEMPLATES: ImportTemplate[] = ${JSON.stringify(templates || [], nu
                 </select>
               </div>
 
-              {/* Upload or URL Switch */}
               <div className="mb-4 space-y-3">
                  <div className="flex gap-2 text-sm">
                      <span className="font-bold text-slate-500">媒体源 Media Source:</span>
@@ -560,12 +572,21 @@ const INITIAL_TEMPLATES: ImportTemplate[] = ${JSON.stringify(templates || [], nu
                      </div>
                      <p className="text-xs text-blue-500 flex items-center font-medium self-center"><Info size={12} className="mr-1"/> 建议 1920x1080, 小于 2MB</p>
                 </div>
-                <BufferedInput 
-                    value={theme.backgroundImage} 
-                    onCommit={(val: string) => onUpdateTheme({...theme, backgroundImage: val})}
-                    placeholder="或输入图片 URL..."
-                    className="w-full bg-white/50 border-b border-slate-300 px-2 py-1 text-xs outline-none focus:border-slate-800 mb-4"
-                />
+                
+                <div className="flex gap-2 mb-4 items-center">
+                    <input 
+                        value={bgUrlInput} 
+                        onChange={(e) => setBgUrlInput(e.target.value)}
+                        placeholder="或输入图片 URL (https://...)"
+                        className="flex-1 bg-white/50 border border-slate-300 rounded-lg px-3 py-2 text-xs outline-none focus:border-slate-800 focus:bg-white transition-colors"
+                    />
+                    <button 
+                        onClick={() => onUpdateTheme({...theme, backgroundImage: bgUrlInput})}
+                        className="px-3 py-2 bg-slate-200 hover:bg-slate-300 text-slate-600 rounded-lg text-xs font-bold transition-colors flex items-center gap-1"
+                    >
+                        <Check size={14}/> 应用 Apply
+                    </button>
+                </div>
 
                 <div className="flex gap-4 mb-4">
                     <label className="text-xs font-bold text-slate-500 uppercase">尺寸 Mode:</label>
@@ -632,7 +653,6 @@ const INITIAL_TEMPLATES: ImportTemplate[] = ${JSON.stringify(templates || [], nu
           </div>
         )}
 
-        {/* Tools and Backup tabs same as before, omitted for brevity as they are less interactive */}
         {activeTab === 'backup' && (
              <div className="space-y-8 max-w-2xl">
                  <div className="bg-amber-50 p-4 rounded-xl border border-amber-100 flex gap-3">
